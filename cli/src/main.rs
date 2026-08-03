@@ -150,10 +150,6 @@ fn confirm(disk: &DiskInfo, subject: &str) -> bool {
 }
 
 fn find_device(spec: &str, force: bool) -> Result<DiskInfo, ExitCode> {
-    if !disks::is_elevated() {
-        eprintln!("raw disk access requires elevation, run from an Administrator terminal");
-        return Err(ExitCode::from(EXIT_DEVICE));
-    }
     let id = device_id(spec);
     let candidates = disks::list_disks(force, u64::MAX);
     candidates
@@ -171,6 +167,35 @@ fn find_device(spec: &str, force: bool) -> Result<DiskInfo, ExitCode> {
             );
             ExitCode::from(EXIT_DEVICE)
         })
+}
+
+fn update_bar(snap: &Progress, bar: &mut Option<ProgressBar>, last_stage: &mut Stage) {
+    if snap.stage != *last_stage {
+        if let Some(b) = bar.take() {
+            b.finish_and_clear();
+        }
+        if !snap.stage.is_terminal() && snap.stage != Stage::Idle {
+            let b = match snap.total {
+                Some(t) => ProgressBar::new(t),
+                None => ProgressBar::new_spinner(),
+            };
+            b.set_style(
+                ProgressStyle::with_template(
+                    "{msg:>9} {bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
+                )
+                .unwrap(),
+            );
+            b.set_message(format!("{:?}", snap.stage));
+            *bar = Some(b);
+        }
+        *last_stage = snap.stage;
+    }
+    if let Some(b) = bar {
+        if let Some(t) = snap.total {
+            b.set_length(t);
+        }
+        b.set_position(snap.done);
+    }
 }
 
 // runs the job on a thread while the main thread reports progress to a
@@ -216,34 +241,7 @@ fn run_job(
             Some(path) => {
                 let _ = std::fs::write(path, worker::format_progress(&snap));
             }
-            None => {
-                if snap.stage != last_stage {
-                    if let Some(b) = bar.take() {
-                        b.finish_and_clear();
-                    }
-                    if !snap.stage.is_terminal() && snap.stage != Stage::Idle {
-                        let b = match snap.total {
-                            Some(t) => ProgressBar::new(t),
-                            None => ProgressBar::new_spinner(),
-                        };
-                        b.set_style(
-                            ProgressStyle::with_template(
-                                "{msg:>9} {bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
-                            )
-                            .unwrap(),
-                        );
-                        b.set_message(format!("{:?}", snap.stage));
-                        bar = Some(b);
-                    }
-                    last_stage = snap.stage;
-                }
-                if let Some(b) = &bar {
-                    if let Some(t) = snap.total {
-                        b.set_length(t);
-                    }
-                    b.set_position(snap.done);
-                }
-            }
+            None => update_bar(&snap, &mut bar, &mut last_stage),
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -322,6 +320,35 @@ fn cmd_copy(
         eprintln!("aborted");
         return ExitCode::from(EXIT_ABORT);
     }
+    #[cfg(windows)]
+    if !disks::is_elevated() {
+        let mut eargs = vec![
+            "copy".to_string(),
+            image.display().to_string(),
+            "--device".into(),
+            args.device.clone(),
+            "--yes".into(),
+            "--buffer-mib".into(),
+            args.buffer_mib.to_string(),
+        ];
+        match &bmap_path {
+            Some(b) => eargs.extend(["--bmap".into(), b.display().to_string()]),
+            None => eargs.push("--raw".into()),
+        }
+        if no_verify {
+            eargs.push("--no-verify".into());
+        }
+        if skip_compare {
+            eargs.push("--skip-compare".into());
+        }
+        if args.eject {
+            eargs.push("--eject".into());
+        }
+        if args.force {
+            eargs.push("--force".into());
+        }
+        return elevate::rerun(eargs);
+    }
     let opts = JobOpts {
         verify: !no_verify,
         buf_bytes: args.buffer_mib.clamp(1, 512) * 1024 * 1024,
@@ -352,6 +379,28 @@ fn cmd_read(output: PathBuf, compress: bool, args: JobArgs) -> ExitCode {
         eprintln!("aborted");
         return ExitCode::from(EXIT_ABORT);
     }
+    #[cfg(windows)]
+    if !disks::is_elevated() {
+        let mut eargs = vec![
+            "read".to_string(),
+            output.display().to_string(),
+            "--device".into(),
+            args.device.clone(),
+            "--yes".into(),
+            "--buffer-mib".into(),
+            args.buffer_mib.to_string(),
+        ];
+        if compress {
+            eargs.push("--compress".into());
+        }
+        if args.eject {
+            eargs.push("--eject".into());
+        }
+        if args.force {
+            eargs.push("--force".into());
+        }
+        return elevate::rerun(eargs);
+    }
     let opts = JobOpts {
         verify: false,
         buf_bytes: args.buffer_mib.clamp(1, 512) * 1024 * 1024,
@@ -363,6 +412,116 @@ fn cmd_read(output: PathBuf, compress: bool, args: JobArgs) -> ExitCode {
         move |prog, cancel| worker::run_read(&output, &disk, &opts, prog, cancel),
         &args,
     )
+}
+
+// unelevated: re-launch ourselves with the runas verb (one UAC prompt) and
+// tail the child's progress file into this console, sudo-style
+#[cfg(windows)]
+mod elevate {
+    use std::path::PathBuf;
+    use std::process::ExitCode;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use buildcast_core::worker::{self, Stage};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+    use windows_sys::Win32::UI::Shell::{
+        SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    };
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn quote(a: &str) -> String {
+        if a.contains(' ') || a.contains('"') {
+            format!("\"{}\"", a.replace('"', "\\\""))
+        } else {
+            a.to_string()
+        }
+    }
+
+    pub fn rerun(mut args: Vec<String>) -> ExitCode {
+        let progress =
+            std::env::temp_dir().join(format!("buildcast-cli-{}.progress", std::process::id()));
+        let cancel = PathBuf::from(format!("{}.cancel", progress.display()));
+        let _ = std::fs::remove_file(&progress);
+        let _ = std::fs::remove_file(&cancel);
+        args.extend([
+            "--progress-file".into(),
+            progress.display().to_string(),
+            "--cancel-file".into(),
+            cancel.display().to_string(),
+        ]);
+
+        let exe = match std::env::current_exe() {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("cannot locate own executable: {e}");
+                return ExitCode::from(crate::EXIT_DEVICE);
+            }
+        };
+        let params = args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" ");
+        let file_w = wide(&exe.display().to_string());
+        let params_w = wide(&params);
+        let verb_w = wide("runas");
+
+        let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = verb_w.as_ptr();
+        info.lpFile = file_w.as_ptr();
+        info.lpParameters = params_w.as_ptr();
+        info.nShow = 0; // SW_HIDE
+
+        if unsafe { ShellExecuteExW(&mut info) } == 0 || info.hProcess.is_null() {
+            eprintln!("elevation was declined");
+            return ExitCode::from(crate::EXIT_ABORT);
+        }
+        let process = info.hProcess;
+
+        super::ctrl_c::install();
+        let mut bar = None;
+        let mut last_stage = Stage::Idle;
+        loop {
+            let exited = unsafe { WaitForSingleObject(process, 0) } == 0;
+            if super::ctrl_c::REQUESTED.load(Ordering::Relaxed) {
+                let _ = std::fs::File::create(&cancel);
+            }
+            if let Ok(text) = std::fs::read_to_string(&progress)
+                && let Some(p) = worker::parse_progress(&text)
+            {
+                crate::update_bar(&p, &mut bar, &mut last_stage);
+            }
+            if exited {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if let Some(b) = bar.take() {
+            b.finish_and_clear();
+        }
+
+        let mut code = 0u32;
+        unsafe { GetExitCodeProcess(process, &mut code) };
+        match std::fs::read_to_string(&progress)
+            .ok()
+            .and_then(|t| worker::parse_progress(&t))
+        {
+            Some(p) if p.stage.is_terminal() => {
+                if code == 0 {
+                    println!("{}", p.message);
+                } else {
+                    eprintln!("{}", p.message);
+                }
+            }
+            _ if code != 0 => eprintln!("helper exited with code {code}"),
+            _ => {}
+        }
+        let _ = std::fs::remove_file(&progress);
+        let _ = std::fs::remove_file(&cancel);
+        ExitCode::from(code.min(255) as u8)
+    }
 }
 
 #[cfg(windows)]
