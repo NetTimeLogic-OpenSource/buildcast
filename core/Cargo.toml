@@ -1,9 +1,9 @@
 [package]
 name = "buildcast-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Disk/stream/bmap core shared by the BuildCast GUI and CLI"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 flate2 = "1"

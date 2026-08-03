@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=BuildCast
+Comment=Write disk images to USB drives and SD cards
+Exec=buildcast
+Icon=buildcast
+Terminal=false
+Type=Application
+Categories=Utility;System;
+Keywords=disk;image;flash;usb;sd;wic;bmap;

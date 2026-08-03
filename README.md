@@ -52,16 +52,29 @@ Exit codes: 0 success, 1 usage error, 2 device error, 3 verification failure,
 offered. Checksums verify the decompressed source stream while writing
 (bmaptool semantics, no read-back).
 
-## Installing (Windows)
+## Installing
 
-Build or download `buildcast-setup-<version>.exe` and run it. It installs the GUI
-and CLI to Program Files, creates Start Menu (optionally desktop) shortcuts, and
-can add the CLI to the system `PATH`. To rebuild the installer locally
-([Inno Setup 6](https://jrsoftware.org/isinfo.php) required):
+Tagged releases (`git tag v0.1.0 && git push --tags`) are built by CI for all
+platforms and published as a GitHub Release with:
+
+- **Windows**: `buildcast-setup-<version>.exe` (Inno Setup installer: Program
+  Files, Start Menu/desktop shortcuts, optional CLI on `PATH`) plus a portable zip
+- **Linux**: `.deb` package (binaries, desktop entry, icon) plus a portable tar.gz
+- **macOS**: `buildcast-<version>-macos.dmg` with `BuildCast.app`
+
+Local packaging:
+
+The version lives in one place: `[workspace.package]` in the root `Cargo.toml`.
+Everything else (exe resources, installer, bundle, GUI header) derives from it;
+the release workflow refuses tags that don't match it.
+
+Local packaging:
 
 ```sh
 cargo build --workspace --release
-ISCC installer\windows\buildcast.iss
+ISCC installer\windows\buildcast.iss     # Windows (Inno Setup 6)
+cargo deb -p buildcast --no-build        # Linux (cargo install cargo-deb)
+bash installer/macos/make_bundle.sh      # macOS
 ```
 
 ## Building

@@ -1,9 +1,9 @@
 [package]
 name = "buildcast"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Write compressed disk images to USB drives and create backups."
-license = "MIT"
+license.workspace = true
 
 # bin embeds requireAdministrator manifest; its test harness can't run unelevated
 [[bin]]
@@ -26,3 +26,14 @@ chrono = "0.4"
 [build-dependencies]
 embed-manifest = "1.4"
 winresource = "0.1"
+
+[package.metadata.deb]
+name = "buildcast"
+section = "utils"
+depends = "$auto"
+assets = [
+    ["../target/release/buildcast", "usr/bin/", "755"],
+    ["../target/release/buildcast-cli", "usr/bin/", "755"],
+    ["assets/buildcast-256.png", "usr/share/icons/hicolor/256x256/apps/buildcast.png", "644"],
+    ["../installer/linux/buildcast.desktop", "usr/share/applications/", "644"],
+]

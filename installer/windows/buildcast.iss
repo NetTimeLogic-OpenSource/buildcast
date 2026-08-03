@@ -2,9 +2,12 @@
 ; build: ISCC buildcast.iss   (expects release binaries in ..\..\target\release)
 
 #define AppName "BuildCast"
-#define AppVersion "0.1.0"
 #define AppPublisher "NetTimeLogic GmbH"
 #define TargetDir "..\..\target\release"
+; version comes from the exe resource, which winresource fills from the
+; workspace Cargo.toml — no second place to bump
+#define FullVer GetVersionNumbersString(TargetDir + "\buildcast.exe")
+#define AppVersion Copy(FullVer, 1, RPos(".", FullVer) - 1)
 
 [Setup]
 AppId={{7B7C63D4-1F2E-4A5B-9C0D-BC0DCA57B1D1}

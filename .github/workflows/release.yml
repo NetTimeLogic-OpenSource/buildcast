@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace --release
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\windows\buildcast.iss
+      - name: Zip portable binaries
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target\release\buildcast.exe, target\release\buildcast-cli.exe `
+            -DestinationPath "buildcast-${env:GITHUB_REF_NAME}-windows-x86_64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            installer/windows/Output/*.exe
+            buildcast-*-windows-x86_64.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches workspace version
+        run: |
+          ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          test "v$ver" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+      - run: cargo build --workspace --release
+      - run: cargo install cargo-deb
+      - run: cargo deb -p buildcast --no-build
+      - name: Tar portable binaries
+        run: |
+          tar czf "buildcast-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            -C target/release buildcast buildcast-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          if-no-files-found: error
+          path: |
+            target/debian/*.deb
+            buildcast-*-linux-x86_64.tar.gz
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace --release
+      - run: bash installer/macos/make_bundle.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: target/release/*.dmg
+
+  release:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/*.exe
+            dist/**/*.zip
+            dist/**/*.deb
+            dist/**/*.tar.gz
+            dist/**/*.dmg
+          generate_release_notes: true

@@ -1,9 +1,9 @@
 [package]
 name = "buildcast-cli"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "CLI for writing disk images to drives, with optional .bmap mapped-block flashing"
-license = "MIT"
+license.workspace = true
 
 # no unit tests in the bin; all tests live in buildcast-core
 [[bin]]
