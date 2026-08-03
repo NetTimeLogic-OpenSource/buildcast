@@ -4,7 +4,7 @@ resolver = "2"
 
 # single source of truth for the app version
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 

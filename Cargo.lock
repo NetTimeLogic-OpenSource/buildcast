@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "buildcast"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "buildcast-core",
  "chrono",
@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "buildcast-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "buildcast-core",
  "clap",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "buildcast-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bzip2",
  "flate2",
