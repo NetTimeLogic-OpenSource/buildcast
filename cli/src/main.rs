@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use buildcast_core::bmap;
-use buildcast_core::disks::{self, human_size, DiskInfo};
+use buildcast_core::disks::{self, DiskInfo, human_size};
 use buildcast_core::stream::Source;
 
 const EXIT_USAGE: u8 = 1;
@@ -73,10 +73,10 @@ fn device_id(spec: &str) -> String {
 // foo.wic.xz -> foo.wic.bmap
 fn default_bmap(image: &Path) -> PathBuf {
     let mut base = image.to_path_buf();
-    if let Some(ext) = base.extension().map(|e| e.to_string_lossy().to_lowercase()) {
-        if ["gz", "xz", "zst", "bz2", "bzip2"].contains(&ext.as_str()) {
-            base.set_extension("");
-        }
+    if let Some(ext) = base.extension().map(|e| e.to_string_lossy().to_lowercase())
+        && ["gz", "xz", "zst", "bz2", "bzip2"].contains(&ext.as_str())
+    {
+        base.set_extension("");
     }
     PathBuf::from(format!("{}.bmap", base.display()))
 }
@@ -202,15 +202,15 @@ fn cmd_copy(
     };
 
     let needed = bm.as_ref().map(|b| b.image_size).or(src.uncomp_size);
-    if let Some(n) = needed {
-        if n > disk.size {
-            eprintln!(
-                "image ({}) is larger than the device ({})",
-                human_size(n),
-                human_size(disk.size)
-            );
-            return ExitCode::from(EXIT_DEVICE);
-        }
+    if let Some(n) = needed
+        && n > disk.size
+    {
+        eprintln!(
+            "image ({}) is larger than the device ({})",
+            human_size(n),
+            human_size(disk.size)
+        );
+        return ExitCode::from(EXIT_DEVICE);
     }
 
     if !yes && !confirm(&disk, &image, needed) {

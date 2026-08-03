@@ -5,7 +5,7 @@ resolver = "2"
 # single source of truth for the app version
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 
 [profile.release]

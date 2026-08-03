@@ -1,12 +1,12 @@
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 
 use crate::bmap;
 use crate::disks::{self, AlignedBuf, DiskInfo};
-use crate::stream::{fill, Sink, Source};
+use crate::stream::{Sink, Source, fill};
 
 // UI wake-up callback, e.g. egui's request_repaint
 pub type Notify = Arc<dyn Fn() + Send + Sync>;
@@ -111,21 +111,23 @@ fn spawn_decoder(
     for _ in 0..DEPTH {
         pool_tx.send(AlignedBuf::new(buf_bytes)).unwrap();
     }
-    std::thread::spawn(move || loop {
-        let Ok(mut buf) = pool_rx.recv() else { break };
-        match fill(&mut reader, buf.as_mut_slice()) {
-            Ok(0) => {
-                let _ = data_tx.send(Ok(Chunk { buf, len: 0 }));
-                break;
-            }
-            Ok(n) => {
-                if data_tx.send(Ok(Chunk { buf, len: n })).is_err() {
+    std::thread::spawn(move || {
+        loop {
+            let Ok(mut buf) = pool_rx.recv() else { break };
+            match fill(&mut reader, buf.as_mut_slice()) {
+                Ok(0) => {
+                    let _ = data_tx.send(Ok(Chunk { buf, len: 0 }));
                     break;
                 }
-            }
-            Err(e) => {
-                let _ = data_tx.send(Err(e));
-                break;
+                Ok(n) => {
+                    if data_tx.send(Ok(Chunk { buf, len: n })).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = data_tx.send(Err(e));
+                    break;
+                }
             }
         }
     });
@@ -270,14 +272,14 @@ fn run_write(
     );
 
     let mut dev = disks::open_disk(disk, true).map_err(disks::err_hint)?;
-    if let Some(t) = src.uncomp_size {
-        if t > dev.size {
-            return Err(io::Error::other(format!(
-                "image ({}) is larger than the device ({})",
-                disks::human_size(t),
-                disks::human_size(dev.size)
-            )));
-        }
+    if let Some(t) = src.uncomp_size
+        && t > dev.size
+    {
+        return Err(io::Error::other(format!(
+            "image ({}) is larger than the device ({})",
+            disks::human_size(t),
+            disks::human_size(dev.size)
+        )));
     }
 
     let sector = dev.sector as usize;

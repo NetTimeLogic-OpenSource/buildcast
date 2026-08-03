@@ -8,7 +8,7 @@ use egui::{
     Stroke,
 };
 
-use buildcast_core::disks::{self, human_size, DiskInfo};
+use buildcast_core::disks::{self, DiskInfo, human_size};
 use buildcast_core::stream;
 use buildcast_core::worker::{self, JobOpts, Notify, Progress, Stage};
 
@@ -323,10 +323,10 @@ impl App {
                                     if let Some((fmt, comp, uncomp)) = &self.image_info {
                                         let mut s =
                                             format!("{} · {}", fmt.name(), human_size(*comp));
-                                        if let Some(u) = uncomp {
-                                            if *fmt != stream::Format::Raw {
-                                                s += &format!(" ({} uncompressed)", human_size(*u));
-                                            }
+                                        if let Some(u) = uncomp
+                                            && *fmt != stream::Format::Raw
+                                        {
+                                            s += &format!(" ({} uncompressed)", human_size(*u));
                                         }
                                         ui.label(RichText::new(s).weak().size(12.0));
                                     } else if let Some(e) = &self.image_err {
@@ -426,13 +426,11 @@ impl App {
             .add_enabled(!busy, Button::new(RichText::new("Add bmap…").size(12.0)))
             .on_hover_text("Optional .bmap: write only mapped blocks, verify with its sha256 sums")
             .clicked()
-        {
-            if let Some(p) = rfd::FileDialog::new()
+            && let Some(p) = rfd::FileDialog::new()
                 .add_filter("bmap", &["bmap"])
                 .pick_file()
-            {
-                self.set_bmap(p);
-            }
+        {
+            self.set_bmap(p);
         }
     }
 
@@ -661,10 +659,10 @@ impl App {
 // foo.wic.xz -> foo.wic.bmap, foo.wic -> foo.wic.bmap
 fn auto_bmap(image: &std::path::Path) -> Option<PathBuf> {
     let mut base = image.to_path_buf();
-    if let Some(ext) = base.extension().map(|e| e.to_string_lossy().to_lowercase()) {
-        if ["gz", "xz", "zst", "bz2", "bzip2"].contains(&ext.as_str()) {
-            base.set_extension("");
-        }
+    if let Some(ext) = base.extension().map(|e| e.to_string_lossy().to_lowercase())
+        && ["gz", "xz", "zst", "bz2", "bzip2"].contains(&ext.as_str())
+    {
+        base.set_extension("");
     }
     let cand = PathBuf::from(format!("{}.bmap", base.display()));
     cand.is_file().then_some(cand)
@@ -709,10 +707,10 @@ impl eframe::App for App {
         let dropped: Option<PathBuf> =
             ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
         let drag_hover = ctx.input(|i| !i.raw.hovered_files.is_empty());
-        if let Some(p) = dropped {
-            if !self.running {
-                self.set_image(p);
-            }
+        if let Some(p) = dropped
+            && !self.running
+        {
+            self.set_image(p);
         }
 
         // a freshly plugged stick shows up when the user tabs back

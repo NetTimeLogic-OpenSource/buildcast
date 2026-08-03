@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --release
       - name: Build installer
         shell: pwsh
@@ -42,6 +43,7 @@ jobs:
           test "v$ver" = "$GITHUB_REF_NAME" || {
             echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - run: cargo build --workspace --release
       - run: cargo install cargo-deb
@@ -63,6 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --release
       - run: bash installer/macos/make_bundle.sh "${GITHUB_REF_NAME#v}"
       - uses: actions/upload-artifact@v4

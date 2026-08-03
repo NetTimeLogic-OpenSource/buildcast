@@ -54,15 +54,13 @@ offered. Checksums verify the decompressed source stream while writing
 
 ## Installing
 
-Tagged releases (`git tag v0.1.0 && git push --tags`) are built by CI for all
+Tagged releases (`git tag v<version> && git push --tags`) are built by CI for all
 platforms and published as a GitHub Release with:
 
 - **Windows**: `buildcast-setup-<version>.exe` (Inno Setup installer: Program
   Files, Start Menu/desktop shortcuts, optional CLI on `PATH`) plus a portable zip
 - **Linux**: `.deb` package (binaries, desktop entry, icon) plus a portable tar.gz
 - **macOS**: `buildcast-<version>-macos.dmg` with `BuildCast.app`
-
-Local packaging:
 
 The version lives in one place: `[workspace.package]` in the root `Cargo.toml`.
 Everything else (exe resources, installer, bundle, GUI header) derives from it;

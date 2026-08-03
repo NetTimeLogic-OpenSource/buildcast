@@ -1,8 +1,8 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -386,7 +386,7 @@ fn open_zip(mut f: File, file_size: u64) -> io::Result<Source> {
         m => {
             return Err(io::Error::other(format!(
                 "unsupported zip compression method {m}"
-            )))
+            )));
         }
     };
     Ok(Source {

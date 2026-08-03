@@ -1,8 +1,8 @@
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
+use quick_xml::events::Event;
 use sha2::{Digest, Sha256};
 
 use crate::disks::AlignedBuf;
@@ -122,12 +122,12 @@ pub fn parse(xml: &str) -> io::Result<Bmap> {
         }
     }
 
-    if let Some(t) = &checksum_type {
-        if t != "sha256" {
-            return Err(err(&format!(
-                "unsupported checksum type \"{t}\" (only sha256)"
-            )));
-        }
+    if let Some(t) = &checksum_type
+        && t != "sha256"
+    {
+        return Err(err(&format!(
+            "unsupported checksum type \"{t}\" (only sha256)"
+        )));
     }
     if image_size == 0 || block_size == 0 || blocks_count == 0 {
         return Err(err("missing ImageSize/BlockSize/BlocksCount"));
@@ -137,10 +137,10 @@ pub fn parse(xml: &str) -> io::Result<Bmap> {
     }
     let mut prev_end = None;
     for r in &ranges {
-        if let Some(p) = prev_end {
-            if r.start <= p {
-                return Err(err("ranges not sorted or overlapping"));
-            }
+        if let Some(p) = prev_end
+            && r.start <= p
+        {
+            return Err(err("ranges not sorted or overlapping"));
         }
         if r.end >= blocks_count {
             return Err(err("range past BlocksCount"));
