@@ -9,6 +9,8 @@ const CURRENT: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct UpdateInfo {
     pub version: String,
+    // consumed by install(), which exists only on Windows
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub installer_url: Option<String>,
 }
 
@@ -17,7 +19,10 @@ pub enum UpdateState {
     Unknown,
     UpToDate,
     Available(UpdateInfo),
+    // constructed only by install(), which exists only on Windows
+    #[cfg_attr(not(windows), allow(dead_code))]
     Downloading,
+    #[cfg_attr(not(windows), allow(dead_code))]
     Error(String),
 }
 
