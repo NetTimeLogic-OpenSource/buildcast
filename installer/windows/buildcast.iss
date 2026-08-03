@@ -49,7 +49,9 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
     Tasks: addtopath; Check: NeedsAddPath('{app}')
 
 [Run]
-Filename: "{app}\buildcast.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; shellexec: the exe's requireAdministrator manifest needs ShellExecute (UAC);
+; plain CreateProcess from the de-elevated postinstall context fails with 740
+Filename: "{app}\buildcast.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
 function NeedsAddPath(Param: string): boolean;
