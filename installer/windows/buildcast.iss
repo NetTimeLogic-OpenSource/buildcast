@@ -27,6 +27,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+; offers "all users" (Program Files) or "me only" (%LocalAppData%\Programs)
+PrivilegesRequiredOverridesAllowed=dialog commandline
 DisableProgramGroupPage=yes
 
 [Tasks]
@@ -46,7 +48,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\buildcast.exe"; Tasks: deskto
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
     ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
-    Tasks: addtopath; Check: NeedsAddPath('{app}')
+    Tasks: addtopath; Check: IsAdminInstallMode and NeedsAddPath('{app}')
+Root: HKCU; Subkey: "Environment"; \
+    ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+    Tasks: addtopath; Check: (not IsAdminInstallMode) and NeedsAddPath('{app}')
 
 [Run]
 ; shellexec: the exe's requireAdministrator manifest needs ShellExecute (UAC);
@@ -58,10 +63,21 @@ function NeedsAddPath(Param: string): boolean;
 var
   OrigPath: string;
   AppDir: string;
+  RootKey: Integer;
+  SubKey: string;
 begin
   AppDir := ExpandConstant(Param);
-  if not RegQueryStringValue(HKLM,
-    'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+  if IsAdminInstallMode then
+  begin
+    RootKey := HKLM;
+    SubKey := 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+  end
+  else
+  begin
+    RootKey := HKCU;
+    SubKey := 'Environment';
+  end;
+  if not RegQueryStringValue(RootKey, SubKey, 'Path', OrigPath) then
   begin
     Result := True;
     exit;
