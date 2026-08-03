@@ -29,6 +29,8 @@ WizardStyle=modern
 PrivilegesRequired=admin
 ; offers "all users" (Program Files) or "me only" (%LocalAppData%\Programs)
 PrivilegesRequiredOverridesAllowed=dialog commandline
+; HKCU is only touched when IsAdminInstallMode is false (see [Registry] checks)
+UsedUserAreasWarning=no
 DisableProgramGroupPage=yes
 
 [Tasks]
