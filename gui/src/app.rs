@@ -1,3 +1,4 @@
+mod update;
 #[cfg(windows)]
 mod win_drop;
 #[cfg(windows)]
@@ -62,6 +63,8 @@ pub struct App {
     remote: Option<win_elevate::RemoteJob>,
     running: bool,
     confirm_write: bool,
+    update: update::SharedUpdate,
+    update_dismissed: bool,
 }
 
 impl App {
@@ -119,9 +122,90 @@ impl App {
             remote: None,
             running: false,
             confirm_write: false,
+            update: Arc::new(Mutex::new(update::UpdateState::Unknown)),
+            update_dismissed: false,
         };
+        update::check(app.update.clone(), Self::notify(&cc.egui_ctx));
         app.refresh_disks();
         app
+    }
+
+    fn update_banner(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.update_dismissed {
+            return;
+        }
+        let state = self.update.lock().unwrap().clone();
+        let acc = accent(ui.visuals().dark_mode);
+        match state {
+            update::UpdateState::Available(info) => {
+                Self::card_frame(ui)
+                    .stroke(Stroke::new(1.0_f32, acc.gamma_multiply(0.6)))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Update available: {} (you have v{})",
+                                    info.version,
+                                    env!("CARGO_PKG_VERSION")
+                                ))
+                                .color(acc),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add(Button::new(RichText::new("✖").size(11.0)).frame(false))
+                                    .clicked()
+                                {
+                                    self.update_dismissed = true;
+                                }
+                                #[cfg(windows)]
+                                if info.installer_url.is_some()
+                                    && ui.button("Install now").clicked()
+                                {
+                                    update::install(
+                                        info.clone(),
+                                        self.update.clone(),
+                                        Self::notify(ctx),
+                                    );
+                                }
+                                if ui.button("Release notes").clicked() {
+                                    ctx.open_url(egui::OpenUrl::new_tab(update::RELEASES_PAGE));
+                                }
+                            });
+                        });
+                    });
+            }
+            update::UpdateState::Downloading => {
+                Self::card_frame(ui).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Downloading update… the installer will start shortly");
+                    });
+                });
+            }
+            update::UpdateState::Error(e) => {
+                Self::card_frame(ui).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(&e)
+                                .color(ui.visuals().warn_fg_color)
+                                .size(12.0),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(Button::new(RichText::new("✖").size(11.0)).frame(false))
+                                .clicked()
+                            {
+                                self.update_dismissed = true;
+                            }
+                        });
+                    });
+                });
+            }
+            _ => {}
+        }
     }
 
     fn refresh_disks(&mut self) {
@@ -858,6 +942,8 @@ impl eframe::App for App {
                         });
                     });
                     ui.label(RichText::new("Write disk images to USB drives").weak());
+
+                    self.update_banner(ui, ctx);
 
                     Self::section(ui, "Image");
                     self.image_card(ui, busy, drag_hover);
