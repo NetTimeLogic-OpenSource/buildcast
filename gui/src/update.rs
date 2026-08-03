@@ -46,12 +46,14 @@ fn is_newer(latest: &str, current: &str) -> bool {
 
 fn fetch_latest() -> Result<UpdateInfo, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let body = ureq::get(&url)
-        .set("User-Agent", "buildcast")
-        .set("Accept", "application/vnd.github+json")
+    let mut resp = ureq::get(&url)
+        .header("User-Agent", "buildcast")
+        .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| e.to_string())?
-        .into_string()
+        .map_err(|e| e.to_string())?;
+    let body = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     let version = v["tag_name"]
@@ -96,12 +98,14 @@ pub fn install(info: UpdateInfo, state: SharedUpdate, notify: Notify) {
             let url = info
                 .installer_url
                 .ok_or("release has no Windows installer")?;
-            let resp = ureq::get(&url)
-                .set("User-Agent", "buildcast")
+            let mut resp = ureq::get(&url)
+                .header("User-Agent", "buildcast")
                 .call()
                 .map_err(|e| e.to_string())?;
             let mut data = Vec::new();
-            std::io::copy(&mut resp.into_reader(), &mut data).map_err(|e| e.to_string())?;
+            // as_reader streams without ureq's 10 MB read_to_vec limit
+            std::io::copy(&mut resp.body_mut().as_reader(), &mut data)
+                .map_err(|e| e.to_string())?;
             let path = std::env::temp_dir().join(format!("buildcast-setup-{}.exe", info.version));
             std::fs::write(&path, data).map_err(|e| e.to_string())?;
             std::process::Command::new(&path)
