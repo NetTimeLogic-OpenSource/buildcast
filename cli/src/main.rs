@@ -1,14 +1,15 @@
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 
-use buildcast_core::bmap;
 use buildcast_core::disks::{self, DiskInfo, human_size};
-use buildcast_core::stream::Source;
+use buildcast_core::worker::{self, JobOpts, Progress, Shared, Stage};
 
 const EXIT_USAGE: u8 = 1;
 const EXIT_DEVICE: u8 = 2;
@@ -26,6 +27,31 @@ struct Cli {
     cmd: Cmd,
 }
 
+#[derive(Args)]
+struct JobArgs {
+    /// Target: number N for \\.\PhysicalDriveN, or a device id from `list`
+    #[arg(long)]
+    device: String,
+    /// Allow non-removable, non-USB targets
+    #[arg(long)]
+    force: bool,
+    /// Skip the confirmation prompt
+    #[arg(long)]
+    yes: bool,
+    /// Eject the media when done
+    #[arg(long)]
+    eject: bool,
+    /// I/O buffer size in MiB
+    #[arg(long, default_value_t = 4)]
+    buffer_mib: usize,
+    /// Write machine-readable progress lines to this file (for host apps)
+    #[arg(long, hide = true)]
+    progress_file: Option<PathBuf>,
+    /// Cancel the job when this file appears
+    #[arg(long, hide = true)]
+    cancel_file: Option<PathBuf>,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// List candidate target drives
@@ -41,24 +67,27 @@ enum Cmd {
         /// .bmap file; default: <image without compression extension>.bmap
         #[arg(long)]
         bmap: Option<PathBuf>,
-        /// Target: number N for \\.\PhysicalDriveN, or a device id from `list`
-        #[arg(long)]
-        device: String,
-        /// Allow non-removable, non-USB targets
-        #[arg(long)]
-        force: bool,
-        /// Skip checksum verification
-        #[arg(long)]
-        no_verify: bool,
-        /// Skip the confirmation prompt
-        #[arg(long)]
-        yes: bool,
         /// Ignore any bmap and stream-write the full image
         #[arg(long)]
         raw: bool,
-        /// Eject the media after a successful write
+        /// Skip verification (bmap read-back / full read-back)
         #[arg(long)]
-        eject: bool,
+        no_verify: bool,
+        /// Write every block without comparing to the device first
+        #[arg(long)]
+        skip_compare: bool,
+        #[command(flatten)]
+        job: JobArgs,
+    },
+    /// Read a drive into a backup image file
+    Read {
+        /// Output file (.dd, or .dd.zst with --compress)
+        output: PathBuf,
+        /// zstd-compress the backup
+        #[arg(long)]
+        compress: bool,
+        #[command(flatten)]
+        job: JobArgs,
     },
 }
 
@@ -82,11 +111,6 @@ fn default_bmap(image: &Path) -> PathBuf {
 }
 
 fn cmd_list(all: bool) -> ExitCode {
-    if !disks::is_elevated() {
-        eprintln!(
-            "warning: not running elevated, drives may be invisible; use an Administrator terminal"
-        );
-    }
     let list = disks::list_disks(all, u64::MAX);
     if list.is_empty() {
         println!(
@@ -112,16 +136,9 @@ fn cmd_list(all: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn confirm(disk: &DiskInfo, image: &Path, image_size: Option<u64>) -> bool {
-    println!("about to ERASE and write:");
-    println!(
-        "  image:  {}{}",
-        image.display(),
-        image_size
-            .map(|s| format!(" ({})", human_size(s)))
-            .unwrap_or_default()
-    );
-    println!("  device: {}  {}", disk.id, disk.label());
+fn confirm(disk: &DiskInfo, subject: &str) -> bool {
+    println!("{subject}");
+    println!("  device: {}  {}", disk.id, disk.label_bus());
     print!("type the device id (or its trailing number) to continue: ");
     let _ = io::stdout().flush();
     let mut line = String::new();
@@ -132,208 +149,220 @@ fn confirm(disk: &DiskInfo, image: &Path, image_size: Option<u64>) -> bool {
     !t.is_empty() && (t == disk.id || disk.id.ends_with(t))
 }
 
-fn progress_bar(total: u64) -> ProgressBar {
-    let pb = ProgressBar::new(total);
-    pb.set_style(
-        ProgressStyle::with_template("{bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})")
-            .unwrap(),
-    );
-    pb
-}
-
-#[allow(clippy::too_many_arguments)]
-fn cmd_copy(
-    image: PathBuf,
-    bmap_path: Option<PathBuf>,
-    device: String,
-    force: bool,
-    no_verify: bool,
-    yes: bool,
-    raw: bool,
-    eject: bool,
-) -> ExitCode {
+fn find_device(spec: &str, force: bool) -> Result<DiskInfo, ExitCode> {
     if !disks::is_elevated() {
         eprintln!("raw disk access requires elevation, run from an Administrator terminal");
-        return ExitCode::from(EXIT_DEVICE);
+        return Err(ExitCode::from(EXIT_DEVICE));
     }
-    let id = device_id(&device);
+    let id = device_id(spec);
     let candidates = disks::list_disks(force, u64::MAX);
-    let Some(disk) = candidates.iter().find(|d| d.id == id).cloned() else {
-        eprintln!(
-            "device \"{id}\" not found among candidates{}",
-            if force {
-                ""
-            } else {
-                " (non-removable drives need --force)"
+    candidates
+        .iter()
+        .find(|d| d.id == id)
+        .cloned()
+        .ok_or_else(|| {
+            eprintln!(
+                "device \"{id}\" not found among candidates{}",
+                if force {
+                    ""
+                } else {
+                    " (non-removable drives need --force)"
+                }
+            );
+            ExitCode::from(EXIT_DEVICE)
+        })
+}
+
+// runs the job on a thread while the main thread reports progress to a
+// human bar or, for host apps, a machine-readable progress file
+fn run_job(
+    job: impl FnOnce(&Shared, &AtomicBool) -> io::Result<String> + Send + 'static,
+    args: &JobArgs,
+) -> ExitCode {
+    let prog: Shared = Arc::new(Mutex::new(Progress::idle()));
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    #[cfg(windows)]
+    ctrl_c::install();
+    if let Some(cf) = args.cancel_file.clone() {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            loop {
+                if cf.exists() {
+                    cancel.store(true, Ordering::Relaxed);
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
             }
-        );
-        return ExitCode::from(EXIT_DEVICE);
+        });
+    }
+
+    let handle = {
+        let prog = prog.clone();
+        let cancel = cancel.clone();
+        std::thread::spawn(move || job(&prog, &cancel))
     };
 
-    let bm = if raw {
+    let machine = args.progress_file.clone();
+    let mut bar: Option<ProgressBar> = None;
+    let mut last_stage = Stage::Idle;
+    while !handle.is_finished() {
+        #[cfg(windows)]
+        if ctrl_c::REQUESTED.load(Ordering::Relaxed) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let snap = prog.lock().unwrap().clone();
+        match &machine {
+            Some(path) => {
+                let _ = std::fs::write(path, worker::format_progress(&snap));
+            }
+            None => {
+                if snap.stage != last_stage {
+                    if let Some(b) = bar.take() {
+                        b.finish_and_clear();
+                    }
+                    if !snap.stage.is_terminal() && snap.stage != Stage::Idle {
+                        let b = match snap.total {
+                            Some(t) => ProgressBar::new(t),
+                            None => ProgressBar::new_spinner(),
+                        };
+                        b.set_style(
+                            ProgressStyle::with_template(
+                                "{msg:>9} {bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
+                            )
+                            .unwrap(),
+                        );
+                        b.set_message(format!("{:?}", snap.stage));
+                        bar = Some(b);
+                    }
+                    last_stage = snap.stage;
+                }
+                if let Some(b) = &bar {
+                    if let Some(t) = snap.total {
+                        b.set_length(t);
+                    }
+                    b.set_position(snap.done);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if let Some(b) = bar.take() {
+        b.finish_and_clear();
+    }
+
+    let result = handle
+        .join()
+        .unwrap_or_else(|_| Err(io::Error::other("job thread panicked")));
+    let (stage, code, msg) = match result {
+        Ok(msg) => (Stage::Done, 0u8, msg),
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => (
+            Stage::Cancelled,
+            EXIT_ABORT,
+            "cancelled; device contents are undefined".into(),
+        ),
+        Err(e)
+            if e.kind() == io::ErrorKind::InvalidData
+                || e.to_string().contains("verification FAILED") =>
+        {
+            (Stage::Error, EXIT_VERIFY, e.to_string())
+        }
+        Err(e) => (Stage::Error, EXIT_DEVICE, disks::err_hint(e).to_string()),
+    };
+
+    if let Some(path) = &machine {
+        let mut p = prog.lock().unwrap().clone();
+        p.stage = stage;
+        p.message = msg.clone();
+        let _ = std::fs::write(path, worker::format_progress(&p));
+    }
+    if code == 0 {
+        println!("{msg}");
+    } else {
+        eprintln!("{msg}");
+    }
+    if code == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(code)
+    }
+}
+
+fn cmd_copy(
+    image: PathBuf,
+    bmap: Option<PathBuf>,
+    raw: bool,
+    no_verify: bool,
+    skip_compare: bool,
+    args: JobArgs,
+) -> ExitCode {
+    let disk = match find_device(&args.device, args.force) {
+        Ok(d) => d,
+        Err(c) => return c,
+    };
+    let bmap_path = if raw {
         None
     } else {
-        let path = bmap_path.unwrap_or_else(|| default_bmap(&image));
-        let xml = match std::fs::read_to_string(&path) {
-            Ok(x) => x,
-            Err(e) => {
-                eprintln!(
-                    "cannot read bmap {}: {e} (use --raw for full writes)",
-                    path.display()
-                );
-                return ExitCode::from(EXIT_USAGE);
-            }
-        };
-        match bmap::parse(&xml) {
-            Ok(b) => Some(b),
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::from(EXIT_USAGE);
-            }
-        }
-    };
-
-    let src = match Source::open(&image) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("cannot open image: {e}");
+        let path = bmap.unwrap_or_else(|| default_bmap(&image));
+        if !path.is_file() {
+            eprintln!(
+                "cannot read bmap {} (use --raw for full writes)",
+                path.display()
+            );
             return ExitCode::from(EXIT_USAGE);
         }
+        Some(path)
     };
-
-    let needed = bm.as_ref().map(|b| b.image_size).or(src.uncomp_size);
-    if let Some(n) = needed
-        && n > disk.size
+    if !args.yes
+        && !confirm(
+            &disk,
+            &format!("about to ERASE the device and write {}", image.display()),
+        )
     {
-        eprintln!(
-            "image ({}) is larger than the device ({})",
-            human_size(n),
-            human_size(disk.size)
-        );
-        return ExitCode::from(EXIT_DEVICE);
-    }
-
-    if !yes && !confirm(&disk, &image, needed) {
         eprintln!("aborted");
         return ExitCode::from(EXIT_ABORT);
     }
-
-    let mut dev = match disks::open_disk(&disk, true).map_err(disks::err_hint) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("cannot open device: {e}");
-            return ExitCode::from(EXIT_DEVICE);
-        }
+    let opts = JobOpts {
+        verify: !no_verify,
+        buf_bytes: args.buffer_mib.clamp(1, 512) * 1024 * 1024,
+        compress: false,
+        force: skip_compare,
+        eject: args.eject,
     };
-    let sector = dev.sector as usize;
-    let buf_bytes = 4 * 1024 * 1024;
-    #[cfg(windows)]
-    ctrl_c::install();
-    #[cfg(windows)]
-    let cancel: &AtomicBool = &ctrl_c::REQUESTED;
-    #[cfg(not(windows))]
-    let cancel = &AtomicBool::new(false);
-    let started = std::time::Instant::now();
-
-    let result: io::Result<(u64, u64)> = match &bm {
-        Some(b) => {
-            let pb = progress_bar(b.mapped_bytes());
-            let mut reader = src.reader;
-            let r = bmap::copy_ranges(
-                &mut reader,
-                &mut dev.file,
-                b,
-                sector,
-                buf_bytes,
-                !no_verify,
-                cancel,
-                |done| pb.set_position(done),
-            );
-            pb.finish();
-            r.map(|s| (s.written, s.skipped))
-        }
-        None => {
-            let pb = match src.uncomp_size {
-                Some(t) => progress_bar(t),
-                None => ProgressBar::new_spinner(),
-            };
-            let mut reader = src.reader;
-            let r = raw_copy(&mut reader, &mut dev, sector, buf_bytes, cancel, |done| {
-                pb.set_position(done)
-            });
-            pb.finish();
-            r.map(|written| (written, 0))
-        }
-    };
-
-    let (written, skipped) = match result {
-        Ok(v) => v,
-        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
-            eprintln!("{e}");
-            return ExitCode::from(EXIT_VERIFY);
-        }
-        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-            eprintln!("aborted; device contents are undefined");
-            return ExitCode::from(EXIT_ABORT);
-        }
-        Err(e) => {
-            eprintln!("write failed: {e}");
-            return ExitCode::from(EXIT_DEVICE);
-        }
-    };
-    if let Err(e) = dev.file.flush() {
-        eprintln!("flush failed: {e}");
-        return ExitCode::from(EXIT_DEVICE);
-    }
-    dev.sync();
-    if eject {
-        match disks::eject_disk(&dev, &disk) {
-            Ok(()) => println!("media ejected"),
-            Err(e) => eprintln!("warning: eject failed ({e}); remove via the system tray"),
-        }
-    }
-
-    let secs = started.elapsed().as_secs_f64();
-    println!(
-        "done: {} written, {} skipped, {:.1}s, {}/s",
-        human_size(written),
-        human_size(skipped),
-        secs,
-        human_size((written as f64 / secs.max(0.001)) as u64)
-    );
-    ExitCode::SUCCESS
+    run_job(
+        move |prog, cancel| match &bmap_path {
+            Some(b) => worker::run_write_bmap(&image, b, &disk, &opts, prog, cancel),
+            None => worker::run_write(&image, &disk, &opts, prog, cancel),
+        },
+        &args,
+    )
 }
 
-fn raw_copy<R: io::Read>(
-    src: &mut R,
-    dev: &mut buildcast_core::disks::Device,
-    sector: usize,
-    buf_bytes: usize,
-    cancel: &AtomicBool,
-    mut on_progress: impl FnMut(u64),
-) -> io::Result<u64> {
-    use buildcast_core::disks::AlignedBuf;
-    use buildcast_core::stream::fill;
-    let mut buf = AlignedBuf::new(buf_bytes);
-    let mut written = 0u64;
-    loop {
-        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
-        }
-        let n = fill(src, buf.as_mut_slice())?;
-        if n == 0 {
-            break;
-        }
-        let padded = n.div_ceil(sector) * sector;
-        buf.as_mut_slice()[n..padded].fill(0);
-        if written + padded as u64 > dev.size {
-            return Err(io::Error::other("image is larger than the device"));
-        }
-        dev.file.write_all(&buf.as_slice()[..padded])?;
-        written += n as u64;
-        on_progress(written);
+fn cmd_read(output: PathBuf, compress: bool, args: JobArgs) -> ExitCode {
+    let disk = match find_device(&args.device, args.force) {
+        Ok(d) => d,
+        Err(c) => return c,
+    };
+    if !args.yes
+        && !confirm(
+            &disk,
+            &format!("about to read the device into {}", output.display()),
+        )
+    {
+        eprintln!("aborted");
+        return ExitCode::from(EXIT_ABORT);
     }
-    Ok(written)
+    let opts = JobOpts {
+        verify: false,
+        buf_bytes: args.buffer_mib.clamp(1, 512) * 1024 * 1024,
+        compress,
+        force: false,
+        eject: args.eject,
+    };
+    run_job(
+        move |prog, cancel| worker::run_read(&output, &disk, &opts, prog, cancel),
+        &args,
+    )
 }
 
 #[cfg(windows)]
@@ -371,12 +400,15 @@ fn main() -> ExitCode {
         Cmd::Copy {
             image,
             bmap,
-            device,
-            force,
-            no_verify,
-            yes,
             raw,
-            eject,
-        } => cmd_copy(image, bmap, device, force, no_verify, yes, raw, eject),
+            no_verify,
+            skip_compare,
+            job,
+        } => cmd_copy(image, bmap, raw, no_verify, skip_compare, job),
+        Cmd::Read {
+            output,
+            compress,
+            job,
+        } => cmd_read(output, compress, job),
     }
 }

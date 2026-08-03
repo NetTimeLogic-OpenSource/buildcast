@@ -15,9 +15,10 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::{
     FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, IOCTL_DISK_GET_DRIVE_GEOMETRY,
-    IOCTL_DISK_GET_LENGTH_INFO, IOCTL_STORAGE_EJECT_MEDIA, IOCTL_STORAGE_GET_DEVICE_NUMBER,
-    IOCTL_STORAGE_MEDIA_REMOVAL, IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery,
-    STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_DISK_GET_LENGTH_INFO, IOCTL_STORAGE_EJECT_MEDIA,
+    IOCTL_STORAGE_GET_DEVICE_NUMBER, IOCTL_STORAGE_MEDIA_REMOVAL, IOCTL_STORAGE_QUERY_PROPERTY,
+    PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
+    StorageDeviceProperty,
 };
 
 const BUS_TYPE_USB: i32 = 7;
@@ -53,6 +54,14 @@ fn disk_length(f: &File) -> io::Result<u64> {
     let mut out = [0u8; 8];
     ioctl(f, IOCTL_DISK_GET_LENGTH_INFO, None, &mut out)?;
     Ok(i64::from_le_bytes(out) as u64)
+}
+
+// DISK_GEOMETRY_EX: DISK_GEOMETRY (24 bytes), DiskSize i64, Data...
+// unlike GET_LENGTH_INFO this works on a zero-access handle (unelevated)
+fn disk_length_geometry(f: &File) -> io::Result<u64> {
+    let mut out = [0u8; 40];
+    ioctl(f, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, None, &mut out)?;
+    Ok(i64::from_le_bytes(out[24..32].try_into().unwrap()) as u64)
 }
 
 fn sector_size(f: &File) -> u32 {
@@ -126,8 +135,9 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
     let mut disks = Vec::new();
     for n in 0..64u32 {
         let path = format!(r"\\.\PhysicalDrive{n}");
+        // zero-access: metadata IOCTLs work without elevation
         let Ok(f) = OpenOptions::new()
-            .read(true)
+            .access_mode(0)
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
             .open(&path)
         else {
@@ -158,7 +168,7 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
             continue;
         }
 
-        let size = disk_length(&f).unwrap_or(0);
+        let size = disk_length_geometry(&f).unwrap_or(0);
         if size == 0 || (!all && size > max_bytes) {
             continue;
         }

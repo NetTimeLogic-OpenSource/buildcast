@@ -45,6 +45,7 @@ buildcast-cli copy foo.wic.xz --device 2 --yes            # uses foo.wic.bmap
 buildcast-cli copy foo.wic.xz --bmap other.bmap --device 2
 buildcast-cli copy foo.wic --device 2 --raw               # full sequential write
 buildcast-cli copy foo.wic.xz --device 2 --yes --eject    # eject when finished
+buildcast-cli read backup.dd.zst --compress --device 2    # backup a drive
 ```
 
 Exit codes: 0 success, 1 usage error, 2 device error, 3 verification failure,
@@ -93,8 +94,10 @@ OpenGL).
 
 Raw disk access needs elevated rights:
 
-- **Windows**: the GUI's embedded manifest asks for Administrator automatically
-  (UAC prompt); run the CLI from an Administrator terminal.
+- **Windows**: the GUI runs as a normal user (browsing, drag & drop, device
+  listing need no elevation); each write or backup launches `buildcast-cli`
+  elevated, so UAC prompts once per job. Run the CLI itself from an
+  Administrator terminal.
 - **Linux**: add your user to the `disk` group, or run with `sudo`.
 - **macOS**: run with `sudo` (`diskutil` is used for enumeration and unmounting).
 

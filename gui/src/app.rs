@@ -1,5 +1,7 @@
 #[cfg(windows)]
 mod win_drop;
+#[cfg(windows)]
+mod win_elevate;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,6 +58,8 @@ pub struct App {
     buf_idx: usize,
     progress: worker::Shared,
     cancel: Arc<AtomicBool>,
+    #[cfg(windows)]
+    remote: Option<win_elevate::RemoteJob>,
     running: bool,
     confirm_write: bool,
 }
@@ -111,6 +115,8 @@ impl App {
             buf_idx: 2,
             progress: Arc::new(Mutex::new(Progress::idle())),
             cancel: Arc::new(AtomicBool::new(false)),
+            #[cfg(windows)]
+            remote: None,
             running: false,
             confirm_write: false,
         };
@@ -195,6 +201,8 @@ impl App {
         }
     }
 
+    // unix in-process jobs only; Windows routes through the elevated CLI
+    #[cfg_attr(windows, allow(dead_code))]
     fn job_opts(&self, compress: bool) -> JobOpts {
         JobOpts {
             verify: self.verify,
@@ -215,6 +223,41 @@ impl App {
         self.running = true;
     }
 
+    #[cfg(windows)]
+    fn start_remote(&mut self, ctx: &egui::Context, mut args: Vec<String>) {
+        use std::sync::atomic::AtomicU64;
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let job = win_elevate::RemoteJob {
+            progress_path: std::env::temp_dir()
+                .join(format!("buildcast-{}-{seq}.progress", std::process::id())),
+        };
+        args.extend([
+            "--yes".into(),
+            "--buffer-mib".into(),
+            BUF_MIB[self.buf_idx].to_string(),
+            "--progress-file".into(),
+            job.progress_path.display().to_string(),
+            "--cancel-file".into(),
+            job.cancel_path().display().to_string(),
+        ]);
+        if self.eject {
+            args.push("--eject".into());
+        }
+        if self.show_all {
+            args.push("--force".into());
+        }
+        self.start_job();
+        match win_elevate::spawn(args, &job, self.progress.clone(), Self::notify(ctx)) {
+            Ok(()) => self.remote = Some(job),
+            Err(e) => {
+                let mut p = self.progress.lock().unwrap();
+                p.stage = Stage::Error;
+                p.message = e.to_string();
+            }
+        }
+    }
+
     fn start_write(&mut self, ctx: &egui::Context) {
         let (Some(image), Some(disk)) = (
             self.image.clone(),
@@ -222,25 +265,48 @@ impl App {
         ) else {
             return;
         };
-        self.start_job();
-        match self.bmap.clone() {
-            Some(bmap) => worker::spawn_write_bmap(
-                image,
-                bmap,
-                disk,
-                self.job_opts(false),
-                self.progress.clone(),
-                self.cancel.clone(),
-                Self::notify(ctx),
-            ),
-            None => worker::spawn_write(
-                image,
-                disk,
-                self.job_opts(false),
-                self.progress.clone(),
-                self.cancel.clone(),
-                Self::notify(ctx),
-            ),
+        #[cfg(windows)]
+        {
+            let mut args = vec![
+                "copy".to_string(),
+                image.display().to_string(),
+                "--device".into(),
+                disk.id.clone(),
+            ];
+            match &self.bmap {
+                Some(b) => args.extend(["--bmap".into(), b.display().to_string()]),
+                None => args.push("--raw".into()),
+            }
+            if !self.verify {
+                args.push("--no-verify".into());
+            }
+            if self.force {
+                args.push("--skip-compare".into());
+            }
+            self.start_remote(ctx, args);
+        }
+        #[cfg(not(windows))]
+        {
+            self.start_job();
+            match self.bmap.clone() {
+                Some(bmap) => worker::spawn_write_bmap(
+                    image,
+                    bmap,
+                    disk,
+                    self.job_opts(false),
+                    self.progress.clone(),
+                    self.cancel.clone(),
+                    Self::notify(ctx),
+                ),
+                None => worker::spawn_write(
+                    image,
+                    disk,
+                    self.job_opts(false),
+                    self.progress.clone(),
+                    self.cancel.clone(),
+                    Self::notify(ctx),
+                ),
+            }
         }
     }
 
@@ -262,15 +328,31 @@ impl App {
             return;
         };
         let compress = self.compress;
-        self.start_job();
-        worker::spawn_read(
-            out,
-            disk,
-            self.job_opts(compress),
-            self.progress.clone(),
-            self.cancel.clone(),
-            Self::notify(ctx),
-        );
+        #[cfg(windows)]
+        {
+            let mut args = vec![
+                "read".to_string(),
+                out.display().to_string(),
+                "--device".into(),
+                disk.id.clone(),
+            ];
+            if compress {
+                args.push("--compress".into());
+            }
+            self.start_remote(ctx, args);
+        }
+        #[cfg(not(windows))]
+        {
+            self.start_job();
+            worker::spawn_read(
+                out,
+                disk,
+                self.job_opts(compress),
+                self.progress.clone(),
+                self.cancel.clone(),
+                Self::notify(ctx),
+            );
+        }
     }
 
     fn card_frame(ui: &egui::Ui) -> Frame {
@@ -544,6 +626,10 @@ impl App {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button("Cancel").clicked() {
                         self.cancel.store(true, Ordering::Relaxed);
+                        #[cfg(windows)]
+                        if let Some(r) = &self.remote {
+                            r.cancel();
+                        }
                     }
                 });
             });
@@ -745,6 +831,10 @@ impl eframe::App for App {
         let prog = self.progress.lock().unwrap().clone();
         if self.running && prog.stage.is_terminal() {
             self.running = false;
+            #[cfg(windows)]
+            {
+                self.remote = None;
+            }
         }
         if self.running {
             ctx.request_repaint_after(Duration::from_millis(100));

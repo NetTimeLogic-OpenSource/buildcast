@@ -27,6 +27,69 @@ impl Stage {
     pub fn is_terminal(self) -> bool {
         matches!(self, Stage::Done | Stage::Error | Stage::Cancelled)
     }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Stage::Idle => 0,
+            Stage::Starting => 1,
+            Stage::Writing => 2,
+            Stage::Verifying => 3,
+            Stage::Reading => 4,
+            Stage::Done => 5,
+            Stage::Error => 6,
+            Stage::Cancelled => 7,
+        }
+    }
+
+    pub fn from_u8(v: u8) -> Stage {
+        match v {
+            1 => Stage::Starting,
+            2 => Stage::Writing,
+            3 => Stage::Verifying,
+            4 => Stage::Reading,
+            5 => Stage::Done,
+            6 => Stage::Error,
+            7 => Stage::Cancelled,
+            _ => Stage::Idle,
+        }
+    }
+}
+
+// single-line wire format for the elevated CLI -> GUI progress file
+pub fn format_progress(p: &Progress) -> String {
+    format!(
+        "P|{}|{}|{}|{}|{}|{:.0}|{}",
+        p.stage.as_u8(),
+        p.done,
+        p.total.map(|t| t as i64).unwrap_or(-1),
+        p.comp_done,
+        p.comp_total,
+        p.speed,
+        p.message.replace(['\n', '\r'], " "),
+    )
+}
+
+pub fn parse_progress(line: &str) -> Option<Progress> {
+    let mut it = line.trim().splitn(8, '|');
+    if it.next()? != "P" {
+        return None;
+    }
+    let stage = Stage::from_u8(it.next()?.parse().ok()?);
+    let done = it.next()?.parse().ok()?;
+    let total: i64 = it.next()?.parse().ok()?;
+    let comp_done = it.next()?.parse().ok()?;
+    let comp_total = it.next()?.parse().ok()?;
+    let speed = it.next()?.parse().ok()?;
+    let message = it.next().unwrap_or("").to_string();
+    Some(Progress {
+        stage,
+        done,
+        total: (total >= 0).then_some(total as u64),
+        comp_done,
+        comp_total,
+        speed,
+        message,
+    })
 }
 
 #[derive(Clone)]
@@ -255,7 +318,7 @@ fn tick(prog: &Shared, done: u64, comp_done: u64, meter: &mut SpeedMeter) {
     p.speed = speed;
 }
 
-fn run_write(
+pub fn run_write(
     image: &std::path::Path,
     disk: &DiskInfo,
     opts: &JobOpts,
@@ -402,7 +465,7 @@ fn run_write(
     }
 }
 
-fn run_write_bmap(
+pub fn run_write_bmap(
     image: &std::path::Path,
     bmap_path: &std::path::Path,
     disk: &DiskInfo,
@@ -480,7 +543,7 @@ fn run_write_bmap(
     ))
 }
 
-fn run_read(
+pub fn run_read(
     out: &std::path::Path,
     disk: &DiskInfo,
     opts: &JobOpts,
@@ -613,6 +676,52 @@ mod tests {
             let _ = pool.try_send(ch.buf);
         }
         assert_eq!(out, data);
+    }
+
+    #[test]
+    fn progress_line_roundtrip() {
+        let p = Progress {
+            stage: Stage::Writing,
+            done: 123,
+            total: Some(456),
+            comp_done: 7,
+            comp_total: 8,
+            speed: 1000.0,
+            message: "hello | with pipe".into(),
+        };
+        let q = parse_progress(&format_progress(&p)).unwrap();
+        assert_eq!(q.stage, Stage::Writing);
+        assert_eq!(
+            (q.done, q.total, q.comp_done, q.comp_total),
+            (123, Some(456), 7, 8)
+        );
+        assert_eq!(q.speed, 1000.0);
+        assert_eq!(q.message, "hello | with pipe");
+
+        let p2 = Progress {
+            total: None,
+            ..Progress::idle()
+        };
+        assert_eq!(parse_progress(&format_progress(&p2)).unwrap().total, None);
+        assert!(parse_progress("garbage").is_none());
+        assert!(parse_progress("").is_none());
+    }
+
+    #[test]
+    fn stage_codes_roundtrip() {
+        for s in [
+            Stage::Idle,
+            Stage::Starting,
+            Stage::Writing,
+            Stage::Verifying,
+            Stage::Reading,
+            Stage::Done,
+            Stage::Error,
+            Stage::Cancelled,
+        ] {
+            assert_eq!(Stage::from_u8(s.as_u8()), s);
+        }
+        assert_eq!(Stage::from_u8(99), Stage::Idle);
     }
 
     #[test]
