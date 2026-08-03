@@ -52,6 +52,18 @@ Exit codes: 0 success, 1 usage error, 2 device error, 3 verification failure,
 offered. Checksums verify the decompressed source stream while writing
 (bmaptool semantics, no read-back).
 
+## Installing (Windows)
+
+Build or download `buildcast-setup-<version>.exe` and run it. It installs the GUI
+and CLI to Program Files, creates Start Menu (optionally desktop) shortcuts, and
+can add the CLI to the system `PATH`. To rebuild the installer locally
+([Inno Setup 6](https://jrsoftware.org/isinfo.php) required):
+
+```sh
+cargo build --workspace --release
+ISCC installer\windows\buildcast.iss
+```
+
 ## Building
 
 Requires a Rust toolchain (stable). C compiler needed for the zstd/xz codecs.
