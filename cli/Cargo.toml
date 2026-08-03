@@ -13,12 +13,12 @@ test = false
 
 [dependencies]
 buildcast-core = { path = "../core" }
-clap = { version = "4", features = ["derive"] }
-indicatif = "0.17"
+clap = { version = "4.6.5", features = ["derive"] }
+indicatif = "0.18.6"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 [build-dependencies]
-embed-manifest = "1.4"
-winresource = "0.1"
+embed-manifest = "1.5.0"
+winresource = "0.1.31"

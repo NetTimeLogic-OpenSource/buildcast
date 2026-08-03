@@ -87,7 +87,7 @@ pub fn parse(xml: &str) -> io::Result<Bmap> {
                 path.push(name);
             }
             Ok(Event::Text(t)) => {
-                let text = t.unescape().map_err(|e| err(&e.to_string()))?;
+                let text = t.decode().map_err(|e| err(&e.to_string()))?;
                 let text = text.trim();
                 if text.is_empty() {
                     continue;

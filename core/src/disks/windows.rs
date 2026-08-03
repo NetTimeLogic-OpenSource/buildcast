@@ -153,7 +153,7 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
         let desc: STORAGE_DEVICE_DESCRIPTOR =
             unsafe { std::ptr::read_unaligned(out.as_ptr() as *const _) };
         let usb = desc.BusType == BUS_TYPE_USB;
-        let removable = desc.RemovableMedia != 0;
+        let removable = desc.RemovableMedia;
         if !all && !(usb || removable) {
             continue;
         }

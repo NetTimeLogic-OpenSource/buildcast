@@ -703,7 +703,9 @@ fn status_line(p: &Progress) -> String {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = root.ctx().clone();
+        let ctx = &ctx;
         let dropped: Option<PathBuf> =
             ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
         let drag_hover = ctx.input(|i| !i.raw.hovered_files.is_empty());
@@ -732,63 +734,61 @@ impl eframe::App for App {
         }
         let busy = self.running;
 
-        egui::CentralPanel::default()
-            .frame(Frame::central_panel(&ctx.style()).inner_margin(18.0))
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("BuildCast").size(22.0).strong());
-                            ui.label(
-                                RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
-                                    .weak()
-                                    .size(11.0),
-                            );
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                egui::global_theme_preference_switch(ui);
-                            });
+        Frame::default().inner_margin(18.0).show(root, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("BuildCast").size(22.0).strong());
+                        ui.label(
+                            RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
+                                .weak()
+                                .size(11.0),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            egui::global_theme_preference_switch(ui);
                         });
-                        ui.label(RichText::new("Write disk images to USB drives").weak());
+                    });
+                    ui.label(RichText::new("Write disk images to USB drives").weak());
 
-                        Self::section(ui, "Image");
-                        self.image_card(ui, busy, drag_hover);
+                    Self::section(ui, "Image");
+                    self.image_card(ui, busy, drag_hover);
 
-                        Self::section(ui, "Device");
-                        self.device_card(ui, busy);
+                    Self::section(ui, "Device");
+                    self.device_card(ui, busy);
 
-                        self.options_row(ui, busy);
-                        ui.add_space(4.0);
+                    self.options_row(ui, busy);
+                    ui.add_space(4.0);
 
-                        let can_write = !busy && self.image.is_some() && self.sel.is_some();
-                        let can_read = !busy && self.sel.is_some();
-                        let half = (ui.available_width() - 10.0) / 2.0;
-                        ui.horizontal(|ui| {
-                            let write = Button::new(
-                                RichText::new("⬇  Write to device")
-                                    .color(Color32::WHITE)
-                                    .strong(),
-                            )
-                            .fill(accent(ui.visuals().dark_mode))
+                    let can_write = !busy && self.image.is_some() && self.sel.is_some();
+                    let can_read = !busy && self.sel.is_some();
+                    let half = (ui.available_width() - 10.0) / 2.0;
+                    ui.horizontal(|ui| {
+                        let write = Button::new(
+                            RichText::new("⬇  Write to device")
+                                .color(Color32::WHITE)
+                                .strong(),
+                        )
+                        .fill(accent(ui.visuals().dark_mode))
+                        .min_size(egui::vec2(half, 40.0));
+                        if ui.add_enabled(can_write, write).clicked() {
+                            self.confirm_write = true;
+                        }
+                        let read = Button::new(RichText::new("⬆  Read backup").strong())
                             .min_size(egui::vec2(half, 40.0));
-                            if ui.add_enabled(can_write, write).clicked() {
-                                self.confirm_write = true;
-                            }
-                            let read = Button::new(RichText::new("⬆  Read backup").strong())
-                                .min_size(egui::vec2(half, 40.0));
-                            if ui.add_enabled(can_read, read).clicked() {
-                                self.start_read(ctx);
-                            }
-                        });
-                        ui.add_space(6.0);
-
-                        if busy {
-                            self.progress_card(ui, &prog);
-                        } else if prog.stage.is_terminal() {
-                            Self::result_banner(ui, &prog);
+                        if ui.add_enabled(can_read, read).clicked() {
+                            self.start_read(ctx);
                         }
                     });
-            });
+                    ui.add_space(6.0);
+
+                    if busy {
+                        self.progress_card(ui, &prog);
+                    } else if prog.stage.is_terminal() {
+                        Self::result_banner(ui, &prog);
+                    }
+                });
+        });
 
         if self.confirm_write {
             self.confirm_modal(ctx);
