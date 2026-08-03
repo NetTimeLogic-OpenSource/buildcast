@@ -1,0 +1,8 @@
+[workspace]
+members = ["core", "gui", "cli"]
+resolver = "2"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3

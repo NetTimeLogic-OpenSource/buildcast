@@ -1,0 +1,28 @@
+[package]
+name = "buildcast"
+version = "0.1.0"
+edition = "2021"
+description = "Write compressed disk images to USB drives and create backups."
+license = "MIT"
+
+# bin embeds requireAdministrator manifest; its test harness can't run unelevated
+[[bin]]
+name = "buildcast"
+path = "src/main.rs"
+test = false
+
+[lib]
+name = "buildcast_gui"
+path = "src/app.rs"
+
+[dependencies]
+buildcast-core = { path = "../core" }
+eframe = "0.32"
+egui = "0.32"
+rfd = "0.15"
+dirs = "6"
+chrono = "0.4"
+
+[build-dependencies]
+embed-manifest = "1.4"
+winresource = "0.1"
