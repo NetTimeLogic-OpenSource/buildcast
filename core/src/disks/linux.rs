@@ -15,10 +15,11 @@ fn sys_read(name: &str, file: &str) -> Option<String> {
 fn base_disk(dev: &str) -> String {
     let d = dev.trim_start_matches("/dev/");
     if d.starts_with("nvme") || d.starts_with("mmcblk") || d.starts_with("loop") {
-        if let Some(pos) = d.rfind('p') {
-            if d[pos + 1..].chars().all(|c| c.is_ascii_digit()) && !d[pos + 1..].is_empty() {
-                return d[..pos].to_string();
-            }
+        if let Some(pos) = d.rfind('p')
+            && d[pos + 1..].chars().all(|c| c.is_ascii_digit())
+            && !d[pos + 1..].is_empty()
+        {
+            return d[..pos].to_string();
         }
         d.to_string()
     } else {

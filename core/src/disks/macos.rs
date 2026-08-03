@@ -20,11 +20,10 @@ fn media_name(id: &str) -> Option<String> {
     let v = diskutil_plist(&["info", "-plist", id]).ok()?;
     let d = v.as_dictionary()?;
     for key in ["MediaName", "IORegistryEntryName"] {
-        if let Some(s) = d.get(key).and_then(|v| v.as_string()) {
-            let s = s.trim();
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
+        if let Some(s) = d.get(key).and_then(|v| v.as_string())
+            && !s.trim().is_empty()
+        {
+            return Some(s.trim().to_string());
         }
     }
     None
