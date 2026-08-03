@@ -734,7 +734,8 @@ impl eframe::App for App {
         }
         let busy = self.running;
 
-        Frame::default().inner_margin(18.0).show(root, |ui| {
+        let panel = Frame::central_panel(root.style()).inner_margin(18.0);
+        egui::CentralPanel::default().frame(panel).show(root, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {

@@ -17,7 +17,14 @@ path = "src/app.rs"
 
 [dependencies]
 buildcast-core = { path = "../core" }
-eframe = "0.35.0"
+# default renderer is wgpu since 0.35 (~8 MB heavier); glow is plenty here
+eframe = { version = "0.35.0", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
 egui = "0.35.0"
 rfd = "0.17.2"
 dirs = "6.0.0"
