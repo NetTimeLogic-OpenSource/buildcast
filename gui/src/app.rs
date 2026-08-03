@@ -1,3 +1,6 @@
+#[cfg(windows)]
+mod win_drop;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -82,6 +85,15 @@ impl App {
                 s.visuals.hyperlink_color = accent(dark);
                 s.visuals.slider_trailing_fill = true;
             });
+        }
+        #[cfg(windows)]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = cc.window_handle()
+                && let RawWindowHandle::Win32(h) = handle.as_raw()
+            {
+                win_drop::install(h.hwnd.get() as _, cc.egui_ctx.clone());
+            }
         }
         let mut app = App {
             image: None,
@@ -706,8 +718,13 @@ impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
-        let dropped: Option<PathBuf> =
+        #[allow(unused_mut)]
+        let mut dropped: Option<PathBuf> =
             ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
+        #[cfg(windows)]
+        {
+            dropped = dropped.or_else(|| win_drop::take().into_iter().next());
+        }
         let drag_hover = ctx.input(|i| !i.raw.hovered_files.is_empty());
         if let Some(p) = dropped
             && !self.running
