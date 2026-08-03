@@ -13,5 +13,6 @@ fn main() {
             .expect("failed to embed icon resource");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
     println!("cargo:rerun-if-changed=assets/buildcast.ico");
 }
