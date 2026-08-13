@@ -198,6 +198,14 @@ fn update_bar(snap: &Progress, bar: &mut Option<ProgressBar>, last_stage: &mut S
     }
 }
 
+// write-then-rename so the host app never reads a half-written snapshot
+fn write_progress(path: &Path, text: String) {
+    let tmp = PathBuf::from(format!("{}.tmp", path.display()));
+    if std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
 // runs the job on a thread while the main thread reports progress to a
 // human bar or, for host apps, a machine-readable progress file
 fn run_job(
@@ -238,9 +246,7 @@ fn run_job(
         }
         let snap = prog.lock().unwrap().clone();
         match &machine {
-            Some(path) => {
-                let _ = std::fs::write(path, worker::format_progress(&snap));
-            }
+            Some(path) => write_progress(path, worker::format_progress(&snap)),
             None => update_bar(&snap, &mut bar, &mut last_stage),
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -272,7 +278,7 @@ fn run_job(
         let mut p = prog.lock().unwrap().clone();
         p.stage = stage;
         p.message = msg.clone();
-        let _ = std::fs::write(path, worker::format_progress(&p));
+        write_progress(path, worker::format_progress(&p));
     }
     if code == 0 {
         println!("{msg}");
@@ -424,6 +430,7 @@ mod elevate {
     use std::time::Duration;
 
     use buildcast_core::worker::{self, Stage};
+    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
     use windows_sys::Win32::UI::Shell::{
         SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -503,7 +510,10 @@ mod elevate {
         }
 
         let mut code = 0u32;
-        unsafe { GetExitCodeProcess(process, &mut code) };
+        unsafe {
+            GetExitCodeProcess(process, &mut code);
+            CloseHandle(process);
+        }
         match std::fs::read_to_string(&progress)
             .ok()
             .and_then(|t| worker::parse_progress(&t))

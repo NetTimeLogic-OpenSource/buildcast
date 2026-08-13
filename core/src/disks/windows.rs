@@ -53,7 +53,7 @@ fn ioctl(f: &File, code: u32, input: Option<&[u8]>, out: &mut [u8]) -> io::Resul
 fn disk_length(f: &File) -> io::Result<u64> {
     let mut out = [0u8; 8];
     ioctl(f, IOCTL_DISK_GET_LENGTH_INFO, None, &mut out)?;
-    Ok(i64::from_le_bytes(out) as u64)
+    Ok(u64::try_from(i64::from_le_bytes(out)).unwrap_or(0))
 }
 
 // DISK_GEOMETRY_EX: DISK_GEOMETRY (24 bytes), DiskSize i64, Data...
@@ -61,7 +61,7 @@ fn disk_length(f: &File) -> io::Result<u64> {
 fn disk_length_geometry(f: &File) -> io::Result<u64> {
     let mut out = [0u8; 40];
     ioctl(f, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, None, &mut out)?;
-    Ok(i64::from_le_bytes(out[24..32].try_into().unwrap()) as u64)
+    Ok(u64::try_from(i64::from_le_bytes(out[24..32].try_into().unwrap())).unwrap_or(0))
 }
 
 fn sector_size(f: &File) -> u32 {

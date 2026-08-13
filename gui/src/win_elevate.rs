@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use buildcast_core::worker::{self, Notify, Shared, Stage};
+use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
 use windows_sys::Win32::UI::Shell::{
     SEE_MASK_FLAG_NO_UI, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -108,7 +109,10 @@ pub fn spawn(args: Vec<String>, job: &RemoteJob, prog: Shared, notify: Notify) -
             std::thread::sleep(Duration::from_millis(150));
         }
         let mut code = 0u32;
-        unsafe { GetExitCodeProcess(process, &mut code) };
+        unsafe {
+            GetExitCodeProcess(process, &mut code);
+            CloseHandle(process);
+        }
         {
             let mut p = prog.lock().unwrap();
             if !p.stage.is_terminal() {

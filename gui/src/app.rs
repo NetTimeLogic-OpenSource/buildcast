@@ -7,7 +7,7 @@ mod win_elevate;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use egui::{
     Align, Button, Color32, ComboBox, CornerRadius, Frame, Label, Layout, ProgressBar, RichText,
@@ -63,6 +63,8 @@ pub struct App {
     remote: Option<win_elevate::RemoteJob>,
     running: bool,
     confirm_write: bool,
+    // when the current result banner appeared; None = dismissed
+    result_since: Option<Instant>,
     update: update::SharedUpdate,
     update_dismissed: bool,
 }
@@ -83,7 +85,7 @@ impl App {
                     &mut s.visuals.widgets.active,
                     &mut s.visuals.widgets.open,
                 ] {
-                    w.corner_radius = CornerRadius::same(7);
+                    w.corner_radius = CornerRadius::same(8);
                 }
                 // checkbox ticks, combo highlights and focus rings follow the accent
                 s.visuals.selection.bg_fill =
@@ -91,6 +93,19 @@ impl App {
                 s.visuals.selection.stroke = Stroke::new(1.0_f32, accent(dark));
                 s.visuals.hyperlink_color = accent(dark);
                 s.visuals.slider_trailing_fill = true;
+                s.visuals.window_corner_radius = CornerRadius::same(12);
+                s.visuals.window_shadow = egui::Shadow {
+                    offset: [0, 6],
+                    blur: 24,
+                    spread: 0,
+                    color: Color32::from_black_alpha(if dark { 96 } else { 40 }),
+                };
+                s.visuals.popup_shadow = egui::Shadow {
+                    offset: [0, 3],
+                    blur: 12,
+                    spread: 0,
+                    color: Color32::from_black_alpha(if dark { 80 } else { 28 }),
+                };
             });
         }
         #[cfg(windows)]
@@ -122,6 +137,7 @@ impl App {
             remote: None,
             running: false,
             confirm_write: false,
+            result_since: None,
             update: Arc::new(Mutex::new(update::UpdateState::Unknown)),
             update_dismissed: false,
         };
@@ -158,9 +174,12 @@ impl App {
                                 {
                                     self.update_dismissed = true;
                                 }
+                                // installing exits the app; never allow it mid-job
                                 #[cfg(windows)]
                                 if info.installer_url.is_some()
-                                    && ui.button("Install now").clicked()
+                                    && ui
+                                        .add_enabled(!self.running, Button::new("Install now"))
+                                        .clicked()
                                 {
                                     update::install(
                                         info.clone(),
@@ -297,6 +316,19 @@ impl App {
         }
     }
 
+    // mirrors the CLI's --force gate; a stale selection must never reach a
+    // non-removable drive after "show all" was toggled off
+    #[cfg(not(windows))]
+    fn refuse_non_removable(&self, disk: &DiskInfo) -> bool {
+        if !disk.removable && !self.show_all {
+            let mut p = self.progress.lock().unwrap();
+            p.stage = Stage::Error;
+            p.message = format!("{} is not removable; enable \"Show all drives\"", disk.id);
+            return true;
+        }
+        false
+    }
+
     fn start_job(&mut self) {
         self.cancel.store(false, Ordering::Relaxed);
         *self.progress.lock().unwrap() = Progress {
@@ -371,6 +403,9 @@ impl App {
         }
         #[cfg(not(windows))]
         {
+            if self.refuse_non_removable(&disk) {
+                return;
+            }
             self.start_job();
             match self.bmap.clone() {
                 Some(bmap) => worker::spawn_write_bmap(
@@ -427,6 +462,9 @@ impl App {
         }
         #[cfg(not(windows))]
         {
+            if self.refuse_non_removable(&disk) {
+                return;
+            }
             self.start_job();
             worker::spawn_read(
                 out,
@@ -440,10 +478,17 @@ impl App {
     }
 
     fn card_frame(ui: &egui::Ui) -> Frame {
+        let dark = ui.visuals().dark_mode;
         Frame::group(ui.style())
-            .corner_radius(CornerRadius::same(9))
-            .inner_margin(12.0)
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(14.0)
             .fill(ui.visuals().faint_bg_color)
+            .shadow(egui::Shadow {
+                offset: [0, 2],
+                blur: 10,
+                spread: 0,
+                color: Color32::from_black_alpha(if dark { 64 } else { 20 }),
+            })
     }
 
     fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
@@ -739,15 +784,18 @@ impl App {
         });
     }
 
-    fn result_banner(ui: &mut egui::Ui, prog: &Progress) {
+    // success/cancel banners fade out after a few seconds; hovering keeps
+    // them alive, errors stay until the next job
+    fn result_banner(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, prog: &Progress) {
+        const TTL: Duration = Duration::from_secs(6);
         let dark = ui.visuals().dark_mode;
         let (color, icon) = match prog.stage {
             Stage::Done => (success(dark), "✔"),
             Stage::Error => (danger(dark), "✖"),
             _ => (ui.visuals().weak_text_color(), "•"),
         };
-        Frame::group(ui.style())
-            .corner_radius(CornerRadius::same(9))
+        let resp = Frame::group(ui.style())
+            .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .stroke(Stroke::new(1.0_f32, color.gamma_multiply(0.6)))
             .fill(color.gamma_multiply(if dark { 0.10 } else { 0.06 }))
@@ -766,6 +814,19 @@ impl App {
                     ui.add(Label::new(RichText::new(&prog.message).color(color).size(13.5)).wrap());
                 });
             });
+        if prog.stage != Stage::Error
+            && let Some(since) = self.result_since
+        {
+            if ui.rect_contains_pointer(resp.response.rect) {
+                self.result_since = Some(Instant::now());
+                ctx.request_repaint_after(TTL);
+            } else if since.elapsed() >= TTL {
+                self.result_since = None;
+                ctx.request_repaint();
+            } else {
+                ctx.request_repaint_after(TTL - since.elapsed());
+            }
+        }
     }
 
     fn confirm_modal(&mut self, ctx: &egui::Context) {
@@ -915,6 +976,7 @@ impl eframe::App for App {
         let prog = self.progress.lock().unwrap().clone();
         if self.running && prog.stage.is_terminal() {
             self.running = false;
+            self.result_since = Some(Instant::now());
             #[cfg(windows)]
             {
                 self.remote = None;
@@ -925,7 +987,7 @@ impl eframe::App for App {
         }
         let busy = self.running;
 
-        let panel = Frame::central_panel(root.style()).inner_margin(18.0);
+        let panel = Frame::central_panel(root.style()).inner_margin(20.0);
         egui::CentralPanel::default().frame(panel).show(root, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -954,8 +1016,14 @@ impl eframe::App for App {
                     self.options_row(ui, busy);
                     ui.add_space(4.0);
 
-                    let can_write = !busy && self.image.is_some() && self.sel.is_some();
-                    let can_read = !busy && self.sel.is_some();
+                    // an update download ends in process::exit; don't start jobs under it
+                    let updating = matches!(
+                        &*self.update.lock().unwrap(),
+                        update::UpdateState::Downloading
+                    );
+                    let can_write =
+                        !busy && !updating && self.image.is_some() && self.sel.is_some();
+                    let can_read = !busy && !updating && self.sel.is_some();
                     let half = (ui.available_width() - 10.0) / 2.0;
                     ui.horizontal(|ui| {
                         let write = Button::new(
@@ -978,8 +1046,10 @@ impl eframe::App for App {
 
                     if busy {
                         self.progress_card(ui, &prog);
-                    } else if prog.stage.is_terminal() {
-                        Self::result_banner(ui, &prog);
+                    } else if prog.stage.is_terminal()
+                        && (prog.stage == Stage::Error || self.result_since.is_some())
+                    {
+                        self.result_banner(ui, ctx, &prog);
                     }
                 });
         });
