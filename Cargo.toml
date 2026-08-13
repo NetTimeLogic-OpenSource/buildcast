@@ -4,9 +4,11 @@ resolver = "2"
 
 # single source of truth for the app version
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 license = "MIT"
+# highest requirement in the tree (egui 0.35); checked by the CI msrv job
+rust-version = "1.92"
 
 [profile.release]
 lto = true
