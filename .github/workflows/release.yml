@@ -12,6 +12,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check tag matches workspace version
+        shell: bash
+        run: |
+          ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          test "v$ver" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -76,6 +82,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check tag matches workspace version
+        run: |
+          ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          test "v$ver" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "CLI for writing disk images to drives, with optional .bmap mapped-block flashing"
 license.workspace = true
+rust-version.workspace = true
 
 # no unit tests in the bin; all tests live in buildcast-core
 [[bin]]
