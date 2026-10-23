@@ -6,7 +6,7 @@ mod win_elevate;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use egui::{
@@ -51,6 +51,12 @@ pub struct App {
     bmap_note: Option<String>,
     disks: Vec<DiskInfo>,
     sel: Option<usize>,
+    // scans run off the UI thread: one unresponsive device can block
+    // CreateFile/IOCTLs (or their unix equivalents) for seconds
+    scan: Option<mpsc::Receiver<Vec<DiskInfo>>>,
+    // refresh requested mid-scan; the in-flight result is stale
+    rescan: bool,
+    repaint: Notify,
     verify: bool,
     compress: bool,
     force: bool,
@@ -125,6 +131,9 @@ impl App {
             bmap_note: None,
             disks: Vec::new(),
             sel: None,
+            scan: None,
+            rescan: false,
+            repaint: Self::notify(&cc.egui_ctx),
             verify: true,
             compress: false,
             force: false,
@@ -228,11 +237,41 @@ impl App {
     }
 
     fn refresh_disks(&mut self) {
+        if self.scan.is_some() {
+            self.rescan = true;
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let (show_all, repaint) = (self.show_all, self.repaint.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(disks::list_disks(show_all, MAX_DISK_BYTES));
+            repaint();
+        });
+        self.scan = Some(rx);
+    }
+
+    fn poll_disks(&mut self) {
+        let Some(rx) = &self.scan else { return };
+        let found = match rx.try_recv() {
+            Ok(found) => found,
+            Err(mpsc::TryRecvError::Empty) => return,
+            // scan thread panicked; keep the old list
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.scan = None;
+                return;
+            }
+        };
+        self.scan = None;
+        // never show a list scanned with a stale "show all" setting
+        if std::mem::take(&mut self.rescan) {
+            self.refresh_disks();
+            return;
+        }
         let prev = self
             .sel
             .and_then(|i| self.disks.get(i))
             .map(|d| d.id.clone());
-        self.disks = disks::list_disks(self.show_all, MAX_DISK_BYTES);
+        self.disks = found;
         self.sel = match prev {
             Some(id) => self.disks.iter().position(|d| d.id == id),
             None => None,
@@ -665,7 +704,9 @@ impl App {
                     .and_then(|i| self.disks.get(i))
                     .map(|d| d.label_bus())
                     .unwrap_or_else(|| {
-                        if self.disks.is_empty() {
+                        if self.disks.is_empty() && self.scan.is_some() {
+                            "Scanning for drives…".into()
+                        } else if self.disks.is_empty() {
                             "No removable drives found; plug one in".into()
                         } else {
                             "Select a device…".into()
@@ -679,6 +720,9 @@ impl App {
                             .clicked()
                         {
                             self.refresh_disks();
+                        }
+                        if self.scan.is_some() {
+                            ui.add(egui::Spinner::new());
                         }
                         ComboBox::from_id_salt("device")
                             .width(ui.available_width())
@@ -972,6 +1016,7 @@ impl eframe::App for App {
         if refocused && !self.running {
             self.refresh_disks();
         }
+        self.poll_disks();
 
         let prog = self.progress.lock().unwrap().clone();
         if self.running && prog.stage.is_terminal() {
