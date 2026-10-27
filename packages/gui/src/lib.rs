@@ -1,5 +1,6 @@
 mod app;
 mod card;
+mod changelog;
 #[cfg(windows)]
 mod remote;
 mod theme;

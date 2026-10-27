@@ -1,6 +1,7 @@
 mod device;
 mod image;
 mod job;
+mod whats_new;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, mpsc};
@@ -13,6 +14,7 @@ use egui::{Align, Button, Frame, Layout, RichText, Stroke};
 
 use self::image::{BmapChoice, Image};
 use crate::card;
+use crate::changelog::Release;
 use crate::theme::{self, Palette};
 use crate::update::{RELEASES_PAGE, UpdateState, Updater};
 
@@ -48,6 +50,7 @@ pub struct App {
     update_dismissed: bool,
     updater: Updater,
     verify: bool,
+    whats_new: Vec<Release>,
 }
 
 impl App {
@@ -90,6 +93,7 @@ impl App {
             update_dismissed: false,
             updater: Updater::check(repaint),
             verify: true,
+            whats_new: Release::unseen(),
         };
         app.refresh_disks();
         app
@@ -259,6 +263,9 @@ impl eframe::App for App {
         }
         if self.confirm_close {
             self.confirm_close_modal(&ctx);
+        }
+        if !self.whats_new.is_empty() {
+            self.whats_new_modal(&ctx);
         }
     }
 }
