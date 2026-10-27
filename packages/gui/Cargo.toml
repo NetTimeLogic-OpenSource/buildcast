@@ -16,7 +16,7 @@ name = "buildcast_gui"
 buildcast-core = { workspace = true }
 chrono = { workspace = true, features = ["clock"] }
 dirs = { workspace = true }
-egui = { workspace = true }
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
 raw-window-handle = { workspace = true }
 rfd = { workspace = true, features = ["wayland", "xdg-portal"] }
 serde_json = { workspace = true, features = ["std"] }
@@ -26,7 +26,15 @@ ureq = { workspace = true, features = ["gzip", "rustls"] }
 # glow instead of the default wgpu renderer saves about 8 MB
 [dependencies.eframe]
 workspace = true
-features = ["accesskit", "default_fonts", "glow", "wayland", "x11"]
+features = [
+    "accesskit",
+    "clipboard",
+    "default_fonts",
+    "glow",
+    "links",
+    "wayland",
+    "x11",
+]
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 workspace = true

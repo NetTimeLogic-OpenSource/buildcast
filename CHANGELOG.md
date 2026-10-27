@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Icons show as empty boxes, and "Release notes" and the links in the About
+  dialog do nothing.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added
