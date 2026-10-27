@@ -1,35 +1,48 @@
-use std::alloc::{Layout, alloc_zeroed, dealloc};
-use std::fs::File;
-use std::io;
-
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
-pub use linux::{eject_disk, list_disks, open_disk};
-
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(target_os = "macos")]
-pub use macos::{eject_disk, list_disks, open_disk};
-
 #[cfg(windows)]
 mod windows;
+
+use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::fs::File;
+
+#[cfg(target_os = "linux")]
+use self::linux as platform;
+#[cfg(target_os = "macos")]
+use self::macos as platform;
 #[cfg(windows)]
-pub use windows::{eject_disk, is_elevated, list_disks, open_disk};
+use self::windows as platform;
+#[cfg(windows)]
+pub use self::windows::is_elevated;
+use crate::Error;
 
-#[cfg(unix)]
-pub fn is_elevated() -> bool {
-    unsafe { libc::geteuid() == 0 }
-}
-
+/// Target drive as listed to the user.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiskInfo {
-    // `\\.\PhysicalDriveN`, `/dev/sdX` or `diskN`
+    pub bus: String,
+    /// `\\.\PhysicalDriveN`, `/dev/sdX` or `diskN`
     pub id: String,
     pub name: String,
-    pub size: u64,
     pub removable: bool,
-    pub bus: String,
+    pub size: u64,
+}
+
+// volumes stay locked or dismounted for the lifetime of this struct
+pub(crate) struct Device {
+    pub(crate) file: File,
+    pub(crate) sector: u32,
+    pub(crate) size: u64,
+    #[cfg(windows)]
+    _volumes: Vec<File>,
+}
+
+// 4096-byte alignment is required by FILE_FLAG_NO_BUFFERING transfers
+pub(crate) struct AlignedBuf {
+    layout: Layout,
+    len: usize,
+    ptr: *mut u8,
 }
 
 impl DiskInfo {
@@ -44,62 +57,72 @@ impl DiskInfo {
             format!("{} · {}", self.label(), self.bus)
         }
     }
-}
 
-// volumes stay locked/dismounted for the lifetime of this struct
-pub struct Device {
-    pub file: File,
-    pub size: u64,
-    pub sector: u32,
-    #[cfg(windows)]
-    pub(crate) _volumes: Vec<File>,
+    /// Lists candidate drives. The system disk is never included.
+    ///
+    /// Without `all`, only removable or USB drives up to `max_bytes` are
+    /// returned.
+    pub fn list(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
+        platform::list(all, max_bytes)
+    }
 }
 
 impl Device {
-    // sync_all issues FlushFileBuffers/fsync, flushing the device write cache
-    pub fn sync(&self) {
-        let _ = self.file.sync_all();
+    pub(crate) fn eject(&self, info: &DiskInfo) -> Result<(), Error> {
+        platform::eject(self, info)
     }
 
-    // ensures the verify pass reads the medium, not a cache: Linux drops the
-    // page cache here; Windows handle is NO_BUFFERING; macOS rdisk is uncached
-    pub fn prepare_verify(&self) {
+    /// Unmounts or locks the volumes of `info` and opens the raw device.
+    pub(crate) fn open(info: &DiskInfo, write: bool) -> Result<Device, Error> {
+        platform::open(info, write)
+    }
+
+    // makes the verify pass read the medium, not a cache: Linux drops the
+    // page cache here, the Windows handle is NO_BUFFERING and macOS rdisk is
+    // uncached
+    pub(crate) fn prepare_verify(&self) {
         #[cfg(target_os = "linux")]
         unsafe {
             use std::os::unix::io::AsRawFd;
             libc::posix_fadvise(self.file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
         }
     }
-}
 
-// 4096-byte alignment required by FILE_FLAG_NO_BUFFERING transfers
-pub struct AlignedBuf {
-    ptr: *mut u8,
-    layout: Layout,
-    len: usize,
+    // sync_all issues FlushFileBuffers or fsync, which flushes the device
+    // write cache
+    pub(crate) fn sync(&self) {
+        let _ = self.file.sync_all();
+    }
 }
-
-unsafe impl Send for AlignedBuf {}
 
 impl AlignedBuf {
-    pub fn new(len: usize) -> AlignedBuf {
+    pub(crate) fn new(len: usize) -> AlignedBuf {
         let layout = Layout::from_size_align(len, 4096).expect("bad layout");
         let ptr = unsafe { alloc_zeroed(layout) };
         assert!(!ptr.is_null(), "out of memory");
-        AlignedBuf { ptr, layout, len }
+        AlignedBuf { layout, len, ptr }
     }
-    pub fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-    }
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
 }
+
+unsafe impl Send for AlignedBuf {}
 
 impl Drop for AlignedBuf {
     fn drop(&mut self) {
         unsafe { dealloc(self.ptr, self.layout) }
     }
+}
+
+#[cfg(unix)]
+pub fn is_elevated() -> bool {
+    unsafe { libc::geteuid() == 0 }
 }
 
 pub fn human_size(b: u64) -> String {
@@ -114,21 +137,6 @@ pub fn human_size(b: u64) -> String {
         format!("{b} B")
     } else {
         format!("{v:.1} {}", UNITS[i])
-    }
-}
-
-pub fn err_hint(e: io::Error) -> io::Error {
-    if e.kind() == io::ErrorKind::PermissionDenied {
-        let hint = if cfg!(windows) {
-            "run as Administrator"
-        } else if cfg!(target_os = "macos") {
-            "run with sudo"
-        } else {
-            "add your user to the 'disk' group or run with sudo"
-        };
-        io::Error::new(e.kind(), format!("{e}; {hint}"))
-    } else {
-        e
     }
 }
 
@@ -151,11 +159,11 @@ mod tests {
     #[test]
     fn disk_label() {
         let d = DiskInfo {
+            bus: "USB".into(),
             id: "x".into(),
             name: "SanDisk Ultra".into(),
-            size: 1024 * 1024 * 1024,
             removable: true,
-            bus: "USB".into(),
+            size: 1024 * 1024 * 1024,
         };
         assert_eq!(d.label(), "SanDisk Ultra  [1.0 GiB]");
         assert_eq!(d.label_bus(), "SanDisk Ultra  [1.0 GiB] · USB");
@@ -174,20 +182,5 @@ mod tests {
         assert!(b.as_slice().iter().all(|&x| x == 0));
         b.as_mut_slice()[8191] = 7;
         assert_eq!(b.as_slice()[8191], 7);
-    }
-
-    #[test]
-    fn err_hint_adds_privilege_hint() {
-        let e = err_hint(io::Error::from(io::ErrorKind::PermissionDenied));
-        assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
-        let hint = if cfg!(windows) {
-            "Administrator"
-        } else {
-            "sudo"
-        };
-        assert!(e.to_string().contains(hint));
-
-        let other = err_hint(io::Error::other("x"));
-        assert_eq!(other.to_string(), "x");
     }
 }

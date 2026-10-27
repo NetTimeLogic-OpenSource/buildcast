@@ -332,7 +332,7 @@ fn zip_encrypted_rejected() {
         Err(e) => e,
         Ok(_) => panic!("encrypted zip accepted"),
     };
-    assert!(err.to_string().contains("encrypted"));
+    assert!(matches!(err, stream::Error::ZipEncrypted));
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn zip_unsupported_method_rejected() {
         Err(e) => e,
         Ok(_) => panic!("bogus method accepted"),
     };
-    assert!(err.to_string().contains("method"));
+    assert!(matches!(err, stream::Error::ZipMethod { method: 99 }));
 }
 
 #[test]
@@ -377,14 +377,14 @@ fn tar_skips_long_name_entries() {
 }
 
 #[test]
-fn probe_reports_format_and_sizes() {
+fn open_reports_format_and_sizes() {
     let data = payload();
     let p = tmp("tp.img");
     std::fs::write(&p, &data).unwrap();
-    let (fmt, comp, uncomp) = stream::probe(&p).unwrap();
-    assert_eq!(fmt, Format::Raw);
-    assert_eq!(comp, data.len() as u64);
-    assert_eq!(uncomp, Some(data.len() as u64));
+    let src = Source::open(&p).unwrap();
+    assert_eq!(src.format, Format::Raw);
+    assert_eq!(src.comp_size, data.len() as u64);
+    assert_eq!(src.uncomp_size, Some(data.len() as u64));
 }
 
 #[test]

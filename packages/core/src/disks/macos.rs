@@ -1,20 +1,20 @@
 use std::fs::OpenOptions;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
 
 use super::{Device, DiskInfo};
+use crate::Error;
 
-fn diskutil_plist(args: &[&str]) -> io::Result<plist::Value> {
+fn diskutil_plist(args: &[&str]) -> Result<plist::Value, Error> {
     let out = Command::new("diskutil").args(args).output()?;
     if !out.status.success() {
-        return Err(io::Error::other(format!(
-            "diskutil {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+        return Err(Error::Diskutil {
+            command: args.join(" "),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        });
     }
-    plist::from_bytes(&out.stdout).map_err(|e| io::Error::other(format!("plist parse: {e}")))
+    plist::from_bytes(&out.stdout).map_err(Error::Plist)
 }
 
 fn media_name(id: &str) -> Option<String> {
@@ -30,7 +30,7 @@ fn media_name(id: &str) -> Option<String> {
     None
 }
 
-pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
+pub(super) fn list(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
     let args: &[&str] = if all {
         &["list", "-plist"]
     } else {
@@ -66,36 +66,37 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
         }
         let name = media_name(id).unwrap_or_else(|| id.to_string());
         disks.push(DiskInfo {
+            bus: "external".into(),
             id: id.to_string(),
             name,
-            size,
             removable: true,
-            bus: "external".into(),
+            size,
         });
     }
     disks
 }
 
-pub fn eject_disk(_dev: &Device, info: &DiskInfo) -> io::Result<()> {
+pub(super) fn eject(_dev: &Device, info: &DiskInfo) -> Result<(), Error> {
     let st = Command::new("diskutil")
         .args(["eject", &format!("/dev/{}", info.id)])
         .status()?;
     if st.success() {
         Ok(())
     } else {
-        Err(io::Error::other("diskutil eject failed"))
+        Err(Error::Eject {
+            id: info.id.clone(),
+        })
     }
 }
 
-pub fn open_disk(info: &DiskInfo, write: bool) -> io::Result<Device> {
+pub(super) fn open(info: &DiskInfo, write: bool) -> Result<Device, Error> {
     let status = Command::new("diskutil")
         .args(["unmountDisk", &format!("/dev/{}", info.id)])
         .status()?;
     if !status.success() {
-        return Err(io::Error::other(format!(
-            "cannot unmount /dev/{} (files in use?)",
-            info.id
-        )));
+        return Err(Error::UnmountDisk {
+            id: info.id.clone(),
+        });
     }
     let mut opts = OpenOptions::new();
     opts.read(true).custom_flags(libc::O_CLOEXEC);
@@ -108,7 +109,7 @@ pub fn open_disk(info: &DiskInfo, write: bool) -> io::Result<Device> {
     let size = if size > 0 { size } else { info.size };
     Ok(Device {
         file,
-        size,
         sector: 512,
+        size,
     })
 }

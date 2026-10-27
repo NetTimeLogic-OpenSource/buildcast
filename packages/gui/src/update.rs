@@ -2,144 +2,141 @@ use std::sync::{Arc, Mutex};
 
 use buildcast_core::worker::Notify;
 
-const REPO: &str = "NetTimeLogic-OpenSource/buildcast";
-pub const RELEASES_PAGE: &str = "https://github.com/NetTimeLogic-OpenSource/buildcast/releases";
-const CURRENT: &str = env!("CARGO_PKG_VERSION");
+use crate::version::Version;
 
-#[derive(Clone)]
-pub struct UpdateInfo {
-    pub version: String,
-    // consumed by install(), which exists only on Windows
-    #[cfg_attr(not(windows), allow(dead_code))]
-    pub installer_url: Option<String>,
+const REPO: &str = "NetTimeLogic-OpenSource/buildcast";
+pub(crate) const RELEASES_PAGE: &str =
+    "https://github.com/NetTimeLogic-OpenSource/buildcast/releases";
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Error {
+    #[error("cannot download the update")]
+    Http(#[from] ureq::Error),
+    #[cfg(windows)]
+    #[error("cannot start the installer")]
+    Io(#[from] std::io::Error),
+    #[error("unexpected release data")]
+    Json(#[from] serde_json::Error),
+    #[error("the latest release has no tag")]
+    MissingTag,
+    #[cfg(windows)]
+    #[error("the release has no Windows installer")]
+    NoInstaller,
 }
 
 #[derive(Clone)]
-pub enum UpdateState {
-    Unknown,
-    UpToDate,
+pub(crate) struct UpdateInfo {
+    // read by install(), which exists only on Windows
+    #[cfg_attr(not(windows), expect(dead_code))]
+    installer_url: Option<String>,
+    pub(crate) version: Version,
+}
+
+#[derive(Clone)]
+pub(crate) enum UpdateState {
     Available(UpdateInfo),
     // constructed only by install(), which exists only on Windows
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(windows), expect(dead_code))]
     Downloading,
-    #[cfg_attr(not(windows), allow(dead_code))]
-    Error(String),
+    #[cfg_attr(not(windows), expect(dead_code))]
+    Failed(Arc<Error>),
+    Unknown,
+    UpToDate,
 }
 
-pub type SharedUpdate = Arc<Mutex<UpdateState>>;
-
-fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let mut it = v.trim().trim_start_matches('v').splitn(3, '.');
-    Some((
-        it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?,
-        // tolerate suffixes like "3-rc1"
-        it.next()?
-            .split(|c: char| !c.is_ascii_digit())
-            .next()?
-            .parse()
-            .ok()?,
-    ))
+/// Background check for a newer GitHub release.
+#[derive(Clone)]
+pub(crate) struct Updater {
+    state: Arc<Mutex<UpdateState>>,
 }
 
-fn is_newer(latest: &str, current: &str) -> bool {
-    match (parse_version(latest), parse_version(current)) {
-        (Some(l), Some(c)) => l > c,
-        _ => false,
+impl UpdateInfo {
+    #[cfg(windows)]
+    pub(crate) fn has_installer(&self) -> bool {
+        self.installer_url.is_some()
+    }
+
+    fn fetch_latest() -> Result<UpdateInfo, Error> {
+        let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
+        let body = ureq::get(&url)
+            .header("User-Agent", "buildcast")
+            .header("Accept", "application/vnd.github+json")
+            .call()?
+            .body_mut()
+            .read_to_string()?;
+        let v: serde_json::Value = serde_json::from_str(&body)?;
+        let version = v["tag_name"]
+            .as_str()
+            .and_then(|t| t.parse().ok())
+            .ok_or(Error::MissingTag)?;
+        let installer_url = v["assets"].as_array().and_then(|assets| {
+            assets.iter().find_map(|a| {
+                let name = a["name"].as_str()?;
+                (name.starts_with("buildcast-setup-") && name.ends_with(".exe"))
+                    .then(|| a["browser_download_url"].as_str().map(str::to_string))
+                    .flatten()
+            })
+        });
+        Ok(UpdateInfo {
+            installer_url,
+            version,
+        })
+    }
+
+    // the setup exe elevates itself or installs per user, so a plain spawn
+    // is enough
+    #[cfg(windows)]
+    fn download_and_run(self) -> Result<(), Error> {
+        let url = self.installer_url.ok_or(Error::NoInstaller)?;
+        let mut resp = ureq::get(&url).header("User-Agent", "buildcast").call()?;
+        let path = std::env::temp_dir().join(format!("buildcast-setup-{}.exe", self.version));
+        // as_reader streams without the 10 MB limit of read_to_vec
+        let mut file = std::fs::File::create(&path)?;
+        std::io::copy(&mut resp.body_mut().as_reader(), &mut file)?;
+        drop(file);
+        std::process::Command::new(&path).spawn()?;
+        Ok(())
     }
 }
 
-fn fetch_latest() -> Result<UpdateInfo, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let mut resp = ureq::get(&url)
-        .header("User-Agent", "buildcast")
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| e.to_string())?;
-    let body = resp
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
-    let version = v["tag_name"]
-        .as_str()
-        .ok_or("no tag_name in release")?
-        .to_string();
-    let installer_url = v["assets"].as_array().and_then(|assets| {
-        assets.iter().find_map(|a| {
-            let name = a["name"].as_str()?;
-            (name.starts_with("buildcast-setup-") && name.ends_with(".exe"))
-                .then(|| a["browser_download_url"].as_str().map(str::to_string))
-                .flatten()
-        })
-    });
-    Ok(UpdateInfo {
-        version,
-        installer_url,
-    })
-}
-
-pub fn check(state: SharedUpdate, notify: Notify) {
-    std::thread::spawn(move || {
-        let next = match fetch_latest() {
-            Ok(info) if is_newer(&info.version, CURRENT) => UpdateState::Available(info),
-            Ok(_) => UpdateState::UpToDate,
-            // offline or rate-limited: stay quiet, no banner
-            Err(_) => UpdateState::Unknown,
+impl Updater {
+    /// Starts the check on a background thread.
+    pub(crate) fn check(notify: Notify) -> Updater {
+        let updater = Updater {
+            state: Arc::new(Mutex::new(UpdateState::Unknown)),
         };
-        *state.lock().unwrap() = next;
-        notify();
-    });
-}
+        let state = updater.state.clone();
+        std::thread::spawn(move || {
+            let next = match UpdateInfo::fetch_latest() {
+                Ok(info) if info.version > Version::current() => UpdateState::Available(info),
+                Ok(_) => UpdateState::UpToDate,
+                // offline or rate-limited: stay quiet
+                Err(_) => UpdateState::Unknown,
+            };
+            *state.lock().unwrap() = next;
+            notify();
+        });
+        updater
+    }
 
-// download the installer and hand off to it; the setup exe elevates itself
-// (or installs per-user) so a plain spawn is fine
-#[cfg(windows)]
-pub fn install(info: UpdateInfo, state: SharedUpdate, notify: Notify) {
-    std::thread::spawn(move || {
-        *state.lock().unwrap() = UpdateState::Downloading;
-        notify();
-        let result = (|| -> Result<(), String> {
-            let url = info
-                .installer_url
-                .ok_or("release has no Windows installer")?;
-            let mut resp = ureq::get(&url)
-                .header("User-Agent", "buildcast")
-                .call()
-                .map_err(|e| e.to_string())?;
-            let mut data = Vec::new();
-            // as_reader streams without ureq's 10 MB read_to_vec limit
-            std::io::copy(&mut resp.body_mut().as_reader(), &mut data)
-                .map_err(|e| e.to_string())?;
-            let path = std::env::temp_dir().join(format!("buildcast-setup-{}.exe", info.version));
-            std::fs::write(&path, data).map_err(|e| e.to_string())?;
-            std::process::Command::new(&path)
-                .spawn()
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        })();
-        match result {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                *state.lock().unwrap() = UpdateState::Error(format!("update failed: {e}"));
-                notify();
+    /// Downloads and starts the installer, then exits the app.
+    #[cfg(windows)]
+    pub(crate) fn install(&self, info: UpdateInfo, notify: Notify) {
+        let state = self.state.clone();
+        std::thread::spawn(move || {
+            *state.lock().unwrap() = UpdateState::Downloading;
+            notify();
+            match info.download_and_run() {
+                Ok(()) => std::process::exit(0),
+                Err(err) => {
+                    *state.lock().unwrap() = UpdateState::Failed(Arc::new(err));
+                    notify();
+                }
             }
-        }
-    });
-}
+        });
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_comparison() {
-        assert!(is_newer("v0.1.2", "0.1.1"));
-        assert!(is_newer("1.0.0", "0.9.9"));
-        assert!(is_newer("v0.2.0-rc1", "0.1.9"));
-        assert!(!is_newer("0.1.1", "0.1.1"));
-        assert!(!is_newer("v0.1.0", "0.1.1"));
-        assert!(!is_newer("garbage", "0.1.1"));
-        assert!(!is_newer("v1.0.0", "junk"));
+    pub(crate) fn state(&self) -> UpdateState {
+        self.state.lock().unwrap().clone()
     }
 }

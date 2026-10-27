@@ -1,6 +1,6 @@
-// Elevated windows never receive OLE drag & drop from unelevated Explorer
-// (UIPI). Legacy WM_DROPFILES *can* be allowed through the message filter,
-// so we revoke winit's OLE target and take drops via a window subclass.
+//! An elevated window gets no OLE drag and drop from an unelevated Explorer
+//! (UIPI). WM_DROPFILES can pass the message filter, so the window takes
+//! drops through a subclass instead of the winit OLE target.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -19,7 +19,7 @@ const WM_COPYGLOBALDATA: u32 = 0x0049;
 static DROPPED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 static CTX: OnceLock<egui::Context> = OnceLock::new();
 
-pub fn install(hwnd: HWND, ctx: egui::Context) {
+pub(crate) fn install(hwnd: HWND, ctx: egui::Context) {
     let _ = CTX.set(ctx);
     unsafe {
         let _ = RevokeDragDrop(hwnd);
@@ -30,7 +30,7 @@ pub fn install(hwnd: HWND, ctx: egui::Context) {
     }
 }
 
-pub fn take() -> Vec<PathBuf> {
+pub(crate) fn take() -> Vec<PathBuf> {
     std::mem::take(&mut DROPPED.lock().unwrap())
 }
 

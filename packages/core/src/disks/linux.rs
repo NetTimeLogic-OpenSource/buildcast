@@ -5,6 +5,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
 use super::{Device, DiskInfo};
+use crate::Error;
 
 fn sys_read(name: &str, file: &str) -> Option<String> {
     fs::read_to_string(format!("/sys/block/{name}/{file}"))
@@ -41,7 +42,7 @@ fn root_disk() -> Option<String> {
     None
 }
 
-pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
+pub(super) fn list(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
     let root = root_disk();
     let mut disks = Vec::new();
     let Ok(entries) = fs::read_dir("/sys/block") else {
@@ -84,18 +85,19 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
             label = name.clone();
         }
         disks.push(DiskInfo {
+            bus: if is_usb { "USB".into() } else { String::new() },
             id: format!("/dev/{name}"),
             name: label,
-            size,
             removable,
-            bus: if is_usb { "USB".into() } else { String::new() },
+            size,
         });
     }
     disks
 }
 
 // deepest mount point first, so nested mounts unwind cleanly
-fn unmount_partitions(dev_path: &str) -> io::Result<()> {
+fn unmount_partitions(dev_path: &str) -> Result<(), Error> {
+    let disk = base_disk(dev_path);
     let mounts = fs::read_to_string("/proc/mounts")?;
     let mut targets: Vec<String> = mounts
         .lines()
@@ -103,41 +105,42 @@ fn unmount_partitions(dev_path: &str) -> io::Result<()> {
             let mut it = line.split_whitespace();
             let dev = it.next()?;
             let mnt = it.next()?;
-            if dev.starts_with(dev_path) {
-                // /proc/mounts escapes spaces as \040
-                Some(mnt.replace("\\040", " "))
-            } else {
-                None
-            }
+            // /proc/mounts escapes spaces as \040
+            (dev.starts_with("/dev/") && base_disk(dev) == disk).then(|| mnt.replace("\\040", " "))
         })
         .collect();
     targets.sort_by_key(|m| std::cmp::Reverse(m.len()));
-    for mnt in targets {
-        let c = CString::new(mnt.clone()).map_err(|_| io::Error::other("bad mount path"))?;
-        if unsafe { libc::umount2(c.as_ptr(), 0) } != 0 {
-            let e = io::Error::last_os_error();
-            return Err(io::Error::new(
-                e.kind(),
-                format!("cannot unmount {mnt}: {e}"),
-            ));
+    for mount in targets {
+        let unmounted = CString::new(mount.as_str())
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+            .and_then(|c| {
+                if unsafe { libc::umount2(c.as_ptr(), 0) } == 0 {
+                    Ok(())
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            });
+        if let Err(source) = unmounted {
+            return Err(Error::Unmount { mount, source });
         }
     }
     Ok(())
 }
 
-pub fn eject_disk(dev: &Device, info: &DiskInfo) -> io::Result<()> {
+pub(super) fn eject(dev: &Device, info: &DiskInfo) -> Result<(), Error> {
     const CDROMEJECT: libc::c_ulong = 0x5309;
     if unsafe { libc::ioctl(dev.file.as_raw_fd(), CDROMEJECT as _) } == 0 {
         return Ok(());
     }
-    let st = std::process::Command::new("eject").arg(&info.id).status();
-    match st {
+    match std::process::Command::new("eject").arg(&info.id).status() {
         Ok(s) if s.success() => Ok(()),
-        _ => Err(io::Error::last_os_error()),
+        _ => Err(Error::Eject {
+            id: info.id.clone(),
+        }),
     }
 }
 
-pub fn open_disk(info: &DiskInfo, write: bool) -> io::Result<Device> {
+pub(super) fn open(info: &DiskInfo, write: bool) -> Result<Device, Error> {
     unmount_partitions(&info.id)?;
     let mut opts = OpenOptions::new();
     opts.read(true);
@@ -161,5 +164,5 @@ pub fn open_disk(info: &DiskInfo, write: bool) -> io::Result<Device> {
     file.seek(SeekFrom::Start(0))?;
     let size = if size > 0 { size } else { info.size };
 
-    Ok(Device { file, size, sector })
+    Ok(Device { file, sector, size })
 }

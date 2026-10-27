@@ -21,6 +21,7 @@ use windows_sys::Win32::System::Ioctl::{
 };
 
 use super::{Device, DiskInfo};
+use crate::Error;
 
 const BUS_TYPE_USB: i32 = 7;
 // CTL_CODE(IOCTL_VOLUME_BASE 'V', 0, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -132,7 +133,7 @@ fn desc_string(buf: &[u8], off: u32) -> String {
         .to_string()
 }
 
-pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
+pub(super) fn list(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
     let sys = system_disk();
     let mut disks = Vec::new();
     for n in 0..64u32 {
@@ -197,18 +198,18 @@ pub fn list_disks(all: bool, max_bytes: u64) -> Vec<DiskInfo> {
         }
         .to_string();
         disks.push(DiskInfo {
+            bus,
             id: path,
             name,
-            size,
             removable,
-            bus,
+            size,
         });
     }
     disks
 }
 
 // returned handles keep the locks alive
-fn lock_volumes(disk: u32) -> io::Result<Vec<File>> {
+fn lock_volumes(disk: u32) -> Result<Vec<File>, Error> {
     let mut held = Vec::new();
     let mut name = [0u16; 512];
     let find = unsafe { FindFirstVolumeW(name.as_mut_ptr(), name.len() as u32) };
@@ -248,9 +249,7 @@ fn lock_volumes(disk: u32) -> io::Result<Vec<File>> {
                     }
                     if !locked {
                         unsafe { FindVolumeClose(find) };
-                        return Err(io::Error::other(
-                            "cannot lock a volume on the target device (files in use?)",
-                        ));
+                        return Err(Error::LockVolume);
                     }
                     let _ = ioctl(&v, FSCTL_DISMOUNT_VOLUME, None, &mut []);
                     held.push(v);
@@ -266,7 +265,7 @@ fn lock_volumes(disk: u32) -> io::Result<Vec<File>> {
     Ok(held)
 }
 
-pub fn eject_disk(dev: &Device, _info: &DiskInfo) -> io::Result<()> {
+pub(super) fn eject(dev: &Device, _info: &DiskInfo) -> Result<(), Error> {
     // PREVENT_MEDIA_REMOVAL { PreventMediaRemoval: FALSE }
     let allow = [0u8; 1];
     let _ = ioctl(
@@ -275,15 +274,18 @@ pub fn eject_disk(dev: &Device, _info: &DiskInfo) -> io::Result<()> {
         Some(&allow),
         &mut [],
     );
-    ioctl(&dev.file, IOCTL_STORAGE_EJECT_MEDIA, None, &mut []).map(|_| ())
+    ioctl(&dev.file, IOCTL_STORAGE_EJECT_MEDIA, None, &mut [])?;
+    Ok(())
 }
 
-pub fn open_disk(info: &DiskInfo, _write: bool) -> io::Result<Device> {
+pub(super) fn open(info: &DiskInfo, _write: bool) -> Result<Device, Error> {
     let n: u32 = info
         .id
         .trim_start_matches(r"\\.\PhysicalDrive")
         .parse()
-        .map_err(|_| io::Error::other("bad disk id"))?;
+        .map_err(|_| Error::DiskId {
+            id: info.id.clone(),
+        })?;
     let volumes = lock_volumes(n)?;
     let file = OpenOptions::new()
         .read(true)
@@ -296,8 +298,8 @@ pub fn open_disk(info: &DiskInfo, _write: bool) -> io::Result<Device> {
     let sector = sector_size(&file);
     Ok(Device {
         file,
-        size,
         sector,
+        size,
         _volumes: volumes,
     })
 }
