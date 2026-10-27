@@ -4,8 +4,8 @@
 #define AppName "BuildCast"
 #define AppPublisher "NetTimeLogic GmbH"
 #define TargetDir "..\..\target\release"
-; version comes from the exe resource, which winresource fills from the
-; workspace Cargo.toml — no second place to bump
+; the version comes from the exe resource, which winresource fills from the
+; workspace Cargo.toml, so there is no second place to bump
 #define FullVer GetVersionNumbersString(TargetDir + "\buildcast.exe")
 #define AppVersion Copy(FullVer, 1, RPos(".", FullVer) - 1)
 
@@ -56,8 +56,6 @@ Root: HKCU; Subkey: "Environment"; \
     Tasks: addtopath; Check: (not IsAdminInstallMode) and NeedsAddPath('{app}')
 
 [Run]
-; shellexec: the exe's requireAdministrator manifest needs ShellExecute (UAC);
-; plain CreateProcess from the de-elevated postinstall context fails with 740
 Filename: "{app}\buildcast.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]

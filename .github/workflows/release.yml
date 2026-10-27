@@ -22,7 +22,7 @@ jobs:
         with:
           # same key as CI so tag runs hit the caches saved on main
           shared-key: build
-          # tag-ref caches are never restorable by later tags; restore main, save nothing
+          # later tags can never restore tag-ref caches, so restore main and save nothing
           save-if: false
       - run: cargo build --workspace --release
       - name: Build installer
@@ -62,7 +62,7 @@ jobs:
         with:
           # same key as CI so tag runs hit the caches saved on main
           shared-key: build
-          # tag-ref caches are never restorable by later tags; restore main, save nothing
+          # later tags can never restore tag-ref caches, so restore main and save nothing
           save-if: false
       - run: cargo build --workspace --release
       - uses: taiki-e/install-action@v2
@@ -100,7 +100,7 @@ jobs:
         with:
           # same key as CI so tag runs hit the caches saved on main
           shared-key: build
-          # tag-ref caches are never restorable by later tags; restore main, save nothing
+          # later tags can never restore tag-ref caches, so restore main and save nothing
           save-if: false
       - run: cargo build --workspace --release
       - run: bash installer/macos/make_bundle.sh "${GITHUB_REF_NAME#v}"
