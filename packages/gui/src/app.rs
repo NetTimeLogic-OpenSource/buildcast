@@ -1,3 +1,4 @@
+mod about;
 mod device;
 mod image;
 mod job;
@@ -12,6 +13,7 @@ use buildcast_core::disks::DiskInfo;
 use buildcast_core::worker::{BufferSize, Notify, Progress, Shared};
 use egui::{Align, Button, Frame, Layout, RichText, Stroke};
 
+use self::about::AboutTab;
 use self::image::{BmapChoice, Image};
 use crate::card;
 use crate::changelog::Release;
@@ -20,6 +22,7 @@ use crate::update::{RELEASES_PAGE, UpdateState, Updater};
 
 /// The BuildCast main window.
 pub struct App {
+    about: Option<AboutTab>,
     bmap: Option<BmapChoice>,
     buffer: BufferSize,
     cancel: Arc<AtomicBool>,
@@ -67,6 +70,7 @@ impl App {
         }
         let repaint = notify(&cc.egui_ctx);
         let mut app = App {
+            about: None,
             bmap: None,
             buffer: BufferSize::default(),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -109,6 +113,13 @@ impl App {
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 egui::global_theme_preference_switch(ui);
+                if ui
+                    .add(Button::new("ℹ").frame(false))
+                    .on_hover_text("About BuildCast")
+                    .clicked()
+                {
+                    self.about = Some(AboutTab::default());
+                }
             });
         });
         ui.label(RichText::new("Write disk images to USB drives").weak());
@@ -264,7 +275,9 @@ impl eframe::App for App {
         if self.confirm_close {
             self.confirm_close_modal(&ctx);
         }
-        if !self.whats_new.is_empty() {
+        if self.about.is_some() {
+            self.about_modal(&ctx);
+        } else if !self.whats_new.is_empty() {
             self.whats_new_modal(&ctx);
         }
     }

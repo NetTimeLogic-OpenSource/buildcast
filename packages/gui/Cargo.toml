@@ -36,6 +36,7 @@ features = [
 
 [build-dependencies]
 embed-manifest = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 winresource = { workspace = true, features = ["toml"] }
 
 [package.metadata.deb]

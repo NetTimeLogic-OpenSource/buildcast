@@ -3,6 +3,7 @@ mod card;
 mod changelog;
 #[cfg(windows)]
 mod remote;
+mod sbom;
 mod theme;
 mod update;
 mod version;
