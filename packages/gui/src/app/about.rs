@@ -1,4 +1,4 @@
-use egui::{Align, Layout, RichText, ScrollArea};
+use egui::{Label, RichText, ScrollArea};
 
 use super::App;
 use crate::changelog::Release;
@@ -19,8 +19,10 @@ impl App {
     pub(super) fn about_modal(&mut self, ctx: &egui::Context) {
         let Some(mut tab) = self.about else { return };
         let mut close = false;
+        let width = modal_width(ctx, 520.0);
         let modal = egui::Modal::new(egui::Id::unique("about")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(width);
+            ui.set_max_width(width);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut tab, AboutTab::About, "About");
                 ui.selectable_value(&mut tab, AboutTab::Changelog, "Changelog");
@@ -40,17 +42,23 @@ impl App {
                     AboutTab::ThirdParty => third_party_tab(ui),
                 });
             ui.separator();
-            ui.horizontal(|ui| {
-                if tab == AboutTab::ThirdParty && ui.button("Save SBOM…").clicked() {
-                    save_sbom();
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    close = ui.button("Close").clicked();
-                });
-            });
+            egui::Sides::new().show(
+                ui,
+                |ui| {
+                    if tab == AboutTab::ThirdParty && ui.button("Save SBOM…").clicked() {
+                        save_sbom();
+                    }
+                },
+                |ui| close = ui.button("Close").clicked(),
+            );
         });
         self.about = (!close && !modal.should_close()).then_some(tab);
     }
+}
+
+/// `preferred`, narrowed to fit the window with a margin.
+pub(super) fn modal_width(ctx: &egui::Context, preferred: f32) -> f32 {
+    preferred.min(ctx.content_rect().width() - 64.0)
 }
 
 fn about_tab(ui: &mut egui::Ui) {
@@ -62,7 +70,7 @@ fn about_tab(ui: &mut egui::Ui) {
     ui.hyperlink_to("Releases", crate::update::RELEASES_PAGE);
     ui.add_space(6.0);
     ui.label(RichText::new("License").strong());
-    ui.label(RichText::new(LICENSE).monospace().size(11.0));
+    ui.add(Label::new(RichText::new(LICENSE).monospace().size(11.0)).wrap());
 }
 
 fn save_sbom() {
@@ -95,19 +103,22 @@ fn third_party_tab(ui: &mut egui::Ui) {
         .spacing([12.0, 2.0])
         .show(ui, |ui| {
             for c in Component::all() {
-                ui.label(c.name);
-                ui.label(RichText::new(c.version).weak());
-                ui.label(RichText::new(c.license).weak());
+                ui.label(&c.name);
+                ui.label(RichText::new(&c.version).weak());
+                ui.add(Label::new(RichText::new(&c.license).weak()).truncate());
                 ui.end_row();
             }
         });
     ui.add_space(8.0);
     ui.label(RichText::new("License texts").strong());
-    for (i, notice) in Notice::all().into_iter().enumerate() {
-        egui::CollapsingHeader::new(&notice.packages)
+    for (i, notice) in Notice::all().iter().enumerate() {
+        egui::CollapsingHeader::new(&notice.title)
             .id_salt(("notice", i))
             .show(ui, |ui| {
-                ui.label(RichText::new(&notice.text).monospace().size(11.0));
+                ui.add(
+                    Label::new(RichText::new(format!("Used by {}", notice.packages)).weak()).wrap(),
+                );
+                ui.add(Label::new(RichText::new(&notice.text).monospace().size(11.0)).wrap());
             });
     }
 }
