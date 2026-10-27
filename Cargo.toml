@@ -36,6 +36,13 @@ windows-sys = { version = "0.61.2", default-features = false }
 winresource = { version = "0.1.31", default-features = false }
 zstd = { version = "0.13.3", default-features = false }
 
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+arbitrary_source_item_ordering = "warn"
+mod_module_files = "warn"
+
 [profile.release]
 lto = true
 strip = true

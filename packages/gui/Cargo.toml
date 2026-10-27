@@ -6,6 +6,9 @@ description = "Write compressed disk images to USB drives and create backups."
 license.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [lib]
 name = "buildcast_gui"
 

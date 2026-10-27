@@ -6,6 +6,9 @@ description = "Disk, stream and bmap core shared by the BuildCast GUI and CLI"
 license.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bzip2 = { workspace = true, features = ["default"] }
 flate2 = { workspace = true, features = ["rust_backend"] }

@@ -6,6 +6,9 @@ description = "CLI for writing disk images to drives, with optional .bmap mapped
 license.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 buildcast-core = { workspace = true }
 indicatif = { workspace = true, features = ["unicode-width"] }
