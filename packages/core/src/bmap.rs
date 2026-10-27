@@ -213,24 +213,20 @@ impl FromStr for Bmap {
         loop {
             match reader.read_event().map_err(ParseError::Xml)? {
                 Event::Start(e) => {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let name = e.name().as_ref().to_owned();
                     if name == "Range" {
                         pending_chksum = None;
                         for a in e.attributes().flatten() {
                             let key = a.key.as_ref();
-                            if key == b"chksum" || key == b"sha1" {
-                                pending_chksum =
-                                    Some(String::from_utf8_lossy(&a.value).trim().to_lowercase());
+                            if key == "chksum" || key == "sha1" {
+                                pending_chksum = Some(a.value.trim().to_lowercase());
                             }
                         }
                     }
                     path.push(name);
                 }
                 Event::Text(t) => {
-                    let text = t
-                        .decode()
-                        .map_err(|err| ParseError::Xml(quick_xml::Error::Encoding(err)))?;
-                    let text = text.trim();
+                    let text = t.trim();
                     if text.is_empty() {
                         continue;
                     }

@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An invalid bmap blocks the write until you remove it, instead of silently
   writing the full image.
 - The drive list refreshes after a job.
+- The theme switch can follow the system theme.
+- Update all dependencies, including egui 0.37. Building now needs Rust 1.95.
 
 ### Fixed
 

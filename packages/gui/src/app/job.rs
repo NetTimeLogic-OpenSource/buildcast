@@ -64,7 +64,7 @@ impl App {
     }
 
     pub(super) fn confirm_close_modal(&mut self, ctx: &egui::Context) {
-        let modal = egui::Modal::new(egui::Id::new("confirm_close")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("confirm_close")).show(ctx, |ui| {
             ui.set_max_width(400.0);
             ui.heading("Stop the running job?");
             ui.add_space(8.0);
@@ -112,7 +112,7 @@ impl App {
             (None, Some(i)) => i.write_size().map(|n| format!("writes {}", human_size(n))),
             (None, None) => None,
         };
-        let modal = egui::Modal::new(egui::Id::new("confirm_write")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("confirm_write")).show(ctx, |ui| {
             ui.set_max_width(400.0);
             ui.heading("⚠ Erase and write?");
             ui.add_space(8.0);

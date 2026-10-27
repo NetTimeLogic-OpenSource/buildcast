@@ -19,7 +19,7 @@ impl App {
     pub(super) fn about_modal(&mut self, ctx: &egui::Context) {
         let Some(mut tab) = self.about else { return };
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("about")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("about")).show(ctx, |ui| {
             ui.set_width(520.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut tab, AboutTab::About, "About");

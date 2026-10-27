@@ -5,7 +5,7 @@ use super::App;
 impl App {
     pub(super) fn whats_new_modal(&mut self, ctx: &egui::Context) {
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("whats_new")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("whats_new")).show(ctx, |ui| {
             ui.set_width(460.0);
             ui.heading(concat!(
                 "What's new in BuildCast ",

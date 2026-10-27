@@ -112,7 +112,7 @@ impl App {
                     .size(11.0),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                egui::global_theme_preference_switch(ui);
+                egui::global_theme_preference_buttons(ui);
                 if ui
                     .add(Button::new("ℹ").frame(false))
                     .on_hover_text("About BuildCast")
@@ -127,7 +127,13 @@ impl App {
 
     // dropped files and a refresh when the user tabs back with a new stick
     fn handle_input(&mut self, ctx: &egui::Context) {
-        let dropped = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
+        let dropped = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .find(|p| !p.as_os_str().is_empty())
+        });
         #[cfg(windows)]
         let dropped = dropped.or_else(|| crate::win_drop::take().into_iter().next());
         if let Some(p) = dropped
