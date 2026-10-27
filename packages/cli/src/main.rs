@@ -51,7 +51,7 @@ enum Cmd {
     Copy {
         /// .wic, .wic.gz, .wic.xz or .wic.zst image
         image: PathBuf,
-        /// .bmap file [default: <image without compression extension>.bmap]
+        /// .bmap file [default: foo.wic.bmap for foo.wic.xz]
         #[arg(long)]
         bmap: Option<PathBuf>,
         /// Ignore any bmap and write the full image
