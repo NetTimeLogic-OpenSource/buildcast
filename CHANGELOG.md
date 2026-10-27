@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-27
+
 ### Fixed
 
 - Icons show as empty boxes, and "Release notes" and the links in the About
@@ -106,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First release: write raw and compressed images, bmap support, verify after
   write, backups, Windows installer, Linux and macOS packages.
 
-[Unreleased]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.5...v0.1.6

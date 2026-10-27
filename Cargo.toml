@@ -4,7 +4,7 @@ resolver = "2"
 
 # single source of truth for the app version
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT"
 # highest requirement in the tree (egui 0.37), checked by the CI msrv job
