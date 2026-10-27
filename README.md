@@ -7,11 +7,11 @@ compressed images to USB drives and SD cards, creates backups, and understands
 
 Workspace layout:
 
-| Crate  | What it is |
-|--------|------------|
-| `core` | shared library: stream decoding, disk access, copy/verify jobs, bmap support |
-| `gui`  | the BuildCast desktop app (`buildcast`) |
-| `cli`  | `buildcast-cli`: scriptable writer; optional `.bmap` flashes only mapped blocks |
+| Package | What it is |
+|---------|------------|
+| `packages/core` | shared library: stream decoding, disk access, copy/verify jobs, bmap support |
+| `packages/gui` | the BuildCast desktop app (`buildcast`) |
+| `packages/cli` | `buildcast-cli`: scriptable writer; optional `.bmap` flashes only mapped blocks |
 
 ## Features
 

@@ -15,10 +15,10 @@ cp "$ROOT/target/release/buildcast-cli" "$APP/Contents/MacOS/"
 ICONSET="$(mktemp -d)/buildcast.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 64 128 256 512; do
-    sips -z "$s" "$s" "$ROOT/gui/assets/buildcast-1024.png" \
+    sips -z "$s" "$s" "$ROOT/packages/gui/assets/buildcast-1024.png" \
         --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
     d=$((s * 2))
-    sips -z "$d" "$d" "$ROOT/gui/assets/buildcast-1024.png" \
+    sips -z "$d" "$d" "$ROOT/packages/gui/assets/buildcast-1024.png" \
         --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/buildcast.icns"

@@ -53,8 +53,8 @@ name = "buildcast"
 section = "utils"
 depends = "$auto"
 assets = [
-    ["../target/release/buildcast", "usr/bin/", "755"],
-    ["../target/release/buildcast-cli", "usr/bin/", "755"],
+    ["target/release/buildcast", "usr/bin/", "755"],
+    ["target/release/buildcast-cli", "usr/bin/", "755"],
     ["assets/buildcast-256.png", "usr/share/icons/hicolor/256x256/apps/buildcast.png", "644"],
-    ["../installer/linux/buildcast.desktop", "usr/share/applications/", "644"],
+    ["../../installer/linux/buildcast.desktop", "usr/share/applications/", "644"],
 ]
