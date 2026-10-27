@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Added
 
 - About dialog with the license, the third-party notices and a CycloneDX SBOM
@@ -98,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First release: write raw and compressed images, bmap support, verify after
   write, backups, Windows installer, Linux and macOS packages.
 
-[Unreleased]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/NetTimeLogic-OpenSource/buildcast/compare/v0.1.4...v0.1.5
