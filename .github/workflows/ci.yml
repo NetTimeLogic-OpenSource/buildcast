@@ -35,7 +35,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: msrv
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - run: cargo +1.95 check --workspace --all-targets
 
   test:
@@ -49,11 +48,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build
-      - name: Install GTK (rfd file dialogs)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo nextest run --workspace
+      - run: cargo test --workspace --doc
       - run: cargo build --workspace --release
       - uses: actions/upload-artifact@v7
         with:

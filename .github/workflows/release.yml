@@ -35,6 +35,11 @@ jobs:
         run: |
           Compress-Archive -Path target\release\buildcast.exe, target\release\buildcast-cli.exe `
             -DestinationPath "buildcast-${env:GITHUB_REF_NAME}-windows-x86_64.zip"
+      - name: Copy SBOM
+        shell: bash
+        run: |
+          cp "$(find target/release/build -path '*/buildcast-*/out/sbom.cdx.json' | head -n 1)" \
+            "buildcast-${GITHUB_REF_NAME}-windows-x86_64.cdx.json"
       - uses: actions/upload-artifact@v7
         with:
           name: windows
@@ -42,6 +47,7 @@ jobs:
           path: |
             installer/windows/Output/*.exe
             buildcast-*-windows-x86_64.zip
+            buildcast-*.cdx.json
 
   linux:
     runs-on: ubuntu-latest
@@ -58,7 +64,6 @@ jobs:
           shared-key: build
           # tag-ref caches are never restorable by later tags; restore main, save nothing
           save-if: false
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - run: cargo build --workspace --release
       - uses: taiki-e/install-action@v2
         with:
@@ -68,6 +73,11 @@ jobs:
         run: |
           tar czf "buildcast-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
             -C target/release buildcast buildcast-cli
+      - name: Copy SBOM
+        shell: bash
+        run: |
+          cp "$(find target/release/build -path '*/buildcast-*/out/sbom.cdx.json' | head -n 1)" \
+            "buildcast-${GITHUB_REF_NAME}-linux-x86_64.cdx.json"
       - uses: actions/upload-artifact@v7
         with:
           name: linux
@@ -75,6 +85,7 @@ jobs:
           path: |
             target/debian/*.deb
             buildcast-*-linux-x86_64.tar.gz
+            buildcast-*.cdx.json
 
   macos:
     runs-on: macos-latest
@@ -93,16 +104,32 @@ jobs:
           save-if: false
       - run: cargo build --workspace --release
       - run: bash installer/macos/make_bundle.sh "${GITHUB_REF_NAME#v}"
+      - name: Copy SBOM
+        shell: bash
+        run: |
+          cp "$(find target/release/build -path '*/buildcast-*/out/sbom.cdx.json' | head -n 1)" \
+            "buildcast-${GITHUB_REF_NAME}-macos.cdx.json"
       - uses: actions/upload-artifact@v7
         with:
           name: macos
           if-no-files-found: error
-          path: target/release/*.dmg
+          path: |
+            target/release/*.dmg
+            buildcast-*.cdx.json
 
   release:
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## \[/ { p = index($0, "[" v "]") > 0; next }
+            /^\[/ { p = 0 }
+            p
+          ' CHANGELOG.md > notes.md
+          grep -q . notes.md || { echo "CHANGELOG.md has no section for $GITHUB_REF_NAME"; exit 1; }
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -115,4 +142,5 @@ jobs:
             dist/**/*.deb
             dist/**/*.tar.gz
             dist/**/*.dmg
-          generate_release_notes: true
+            dist/**/*.cdx.json
+          body_path: notes.md
