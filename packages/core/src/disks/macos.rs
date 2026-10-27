@@ -1,8 +1,9 @@
-use super::{Device, DiskInfo};
 use std::fs::OpenOptions;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
+
+use super::{Device, DiskInfo};
 
 fn diskutil_plist(args: &[&str]) -> io::Result<plist::Value> {
     let out = Command::new("diskutil").args(args).output()?;

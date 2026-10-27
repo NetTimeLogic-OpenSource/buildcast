@@ -1,9 +1,10 @@
-use super::{Device, DiskInfo};
 use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
+
+use super::{Device, DiskInfo};
 
 fn sys_read(name: &str, file: &str) -> Option<String> {
     fs::read_to_string(format!("/sys/block/{name}/{file}"))

@@ -584,8 +584,9 @@ pub fn run_read(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     #[test]
     fn stage_terminal() {

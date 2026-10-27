@@ -18,7 +18,6 @@ jobs:
           ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           test "v$ver" = "$GITHUB_REF_NAME" || {
             echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           # same key as CI so tag runs hit the caches saved on main
@@ -53,7 +52,6 @@ jobs:
           ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           test "v$ver" = "$GITHUB_REF_NAME" || {
             echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           # same key as CI so tag runs hit the caches saved on main
@@ -87,7 +85,6 @@ jobs:
           ver=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           test "v$ver" = "$GITHUB_REF_NAME" || {
             echo "tag $GITHUB_REF_NAME != Cargo.toml version $ver"; exit 1; }
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           # same key as CI so tag runs hit the caches saved on main

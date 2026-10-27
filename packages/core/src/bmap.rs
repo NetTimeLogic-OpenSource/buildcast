@@ -245,7 +245,8 @@ where
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "checksum mismatch in range {i} (blocks {}-{}, offset {offset}): expected {want}, got {got}",
+                        "checksum mismatch in range {i} (blocks {}-{}, offset {offset}): expected \
+                         {want}, got {got}",
                         r.start, r.end
                     ),
                 ));
@@ -298,7 +299,8 @@ where
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "read-back verification failed in range {i} (blocks {}-{}, offset {offset}): expected {want}, got {got}",
+                    "read-back verification failed in range {i} (blocks {}-{}, offset {offset}): \
+                     expected {want}, got {got}",
                     r.start, r.end
                 ),
             ));
@@ -309,9 +311,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
     use std::sync::atomic::AtomicBool;
+
+    use super::*;
 
     fn sha(data: &[u8]) -> String {
         hex(&Sha256::digest(data))
@@ -321,7 +324,8 @@ mod tests {
         (0..64 * 1024u32).map(|i| (i % 251) as u8).collect()
     }
 
-    // 64 KiB image, 4 KiB blocks, 16 blocks; mapped: 0-1, 4, 10-15 (tail clamps)
+    // 64 KiB image, 4 KiB blocks, 16 blocks; mapped: 0-1, 4, 10-15 (tail
+    // clamps)
     fn fixture(image: &[u8], image_size: u64) -> String {
         let bs = 4096usize;
         let r = |a: usize, b: usize| {
@@ -433,7 +437,7 @@ mod tests {
     fn copy_detects_checksum_mismatch() {
         let img = fixture_image();
         let mut corrupted = img.clone();
-        corrupted[4096 * 4 + 7] ^= 0xff;
+        corrupted[4096 * 4 + 7] ^= 0xFF;
         let bm = parse(&fixture(&img, 64 * 1024)).unwrap();
         let cancel = AtomicBool::new(false);
         let err = copy_ranges(

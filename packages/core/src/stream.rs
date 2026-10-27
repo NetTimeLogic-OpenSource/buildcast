@@ -56,7 +56,7 @@ pub fn probe(path: &Path) -> io::Result<(Format, u64, Option<u64>)> {
 }
 
 fn detect(magic: &[u8]) -> Format {
-    if magic.len() >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+    if magic.len() >= 2 && magic[0] == 0x1F && magic[1] == 0x8B {
         Format::Gzip
     } else if magic.len() >= 3 && &magic[..3] == b"BZh" {
         Format::Bzip2
@@ -172,7 +172,7 @@ pub fn fill(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     Ok(n)
 }
 
-/* ----------------------------- XZ ----------------------------- */
+// ----------------------------- XZ -----------------------------
 
 fn xz_varint(b: &[u8], p: &mut usize) -> Option<u64> {
     let mut v = 0u64;
@@ -180,7 +180,7 @@ fn xz_varint(b: &[u8], p: &mut usize) -> Option<u64> {
     loop {
         let byte = *b.get(*p)?;
         *p += 1;
-        v |= ((byte & 0x7f) as u64) << shift;
+        v |= ((byte & 0x7F) as u64) << shift;
         if byte & 0x80 == 0 {
             return Some(v);
         }
@@ -228,7 +228,7 @@ fn xz_uncompressed_size(f: &mut File, len: u64) -> Option<u64> {
     Some(total)
 }
 
-/* ----------------------------- TAR ----------------------------- */
+// ----------------------------- TAR -----------------------------
 
 fn octal(b: &[u8]) -> io::Result<u64> {
     let s: String = b
@@ -259,7 +259,7 @@ fn tar_first_entry(mut r: Box<dyn Read + Send>) -> io::Result<(Box<dyn Read + Se
     Err(io::Error::other("no regular file found in tar archive"))
 }
 
-/* ----------------------------- ZIP ----------------------------- */
+// ----------------------------- ZIP -----------------------------
 
 fn u16le(b: &[u8]) -> u64 {
     u16::from_le_bytes([b[0], b[1]]) as u64
@@ -398,7 +398,7 @@ fn open_zip(mut f: File, file_size: u64) -> io::Result<Source> {
     })
 }
 
-/* ----------------------------- Sink ----------------------------- */
+// ----------------------------- Sink -----------------------------
 
 pub enum Sink {
     Raw(File),
@@ -436,13 +436,14 @@ impl Sink {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
     use std::path::PathBuf;
 
+    use super::*;
+
     #[test]
     fn detect_formats() {
-        assert_eq!(detect(&[0x1f, 0x8b, 0]), Format::Gzip);
+        assert_eq!(detect(&[0x1F, 0x8B, 0]), Format::Gzip);
         assert_eq!(detect(b"BZh9"), Format::Bzip2);
         assert_eq!(detect(b"\xfd7zXZ\x00rest"), Format::Xz);
         assert_eq!(detect(b"\x28\xb5\x2f\xfdrest"), Format::Zstd);
@@ -531,13 +532,13 @@ mod tests {
     #[test]
     fn varint_edges() {
         let mut p = 0;
-        assert_eq!(xz_varint(&[0x7f], &mut p), Some(0x7f));
+        assert_eq!(xz_varint(&[0x7F], &mut p), Some(0x7F));
         let mut p = 0;
         assert_eq!(xz_varint(&[0x80, 0x01], &mut p), Some(128));
         let mut p = 0;
         assert_eq!(xz_varint(&[0x80], &mut p), None);
         let mut p = 0;
-        assert_eq!(xz_varint(&[0xff; 10], &mut p), None);
+        assert_eq!(xz_varint(&[0xFF; 10], &mut p), None);
         let mut p = 0;
         assert_eq!(xz_varint(&[], &mut p), None);
     }
@@ -554,7 +555,7 @@ mod tests {
         assert_eq!((u, c), (123, 456));
 
         let (mut u, mut c) = (5u64, 6u64);
-        parse_zip64_extra(&[0x09, 0x00, 0x02, 0x00, 0xaa, 0xbb], &mut u, &mut c);
+        parse_zip64_extra(&[0x09, 0x00, 0x02, 0x00, 0xAA, 0xBB], &mut u, &mut c);
         assert_eq!((u, c), (5, 6));
 
         let (mut u, mut c) = (0xFFFF_FFFFu64, 7u64);
@@ -576,7 +577,7 @@ mod tests {
 
     #[test]
     fn xz_size_rejects_garbage() {
-        let p = tmpfile("junk.bin", &[0xabu8; 100]);
+        let p = tmpfile("junk.bin", &[0xABu8; 100]);
         let mut f = File::open(&p).unwrap();
         assert_eq!(xz_uncompressed_size(&mut f, 100), None);
 

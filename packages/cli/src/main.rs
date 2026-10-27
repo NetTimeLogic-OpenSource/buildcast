@@ -5,11 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clap::{Args, Parser, Subcommand};
-use indicatif::{ProgressBar, ProgressStyle};
-
 use buildcast_core::disks::{self, DiskInfo, human_size};
 use buildcast_core::worker::{self, JobOpts, Progress, Shared, Stage};
+use clap::{Args, Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 
 const EXIT_USAGE: u8 = 1;
 const EXIT_DEVICE: u8 = 2;

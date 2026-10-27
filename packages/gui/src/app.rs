@@ -9,37 +9,36 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use buildcast_core::disks::{self, DiskInfo, human_size};
+use buildcast_core::stream;
+use buildcast_core::worker::{self, JobOpts, Notify, Progress, Stage};
 use egui::{
     Align, Button, Color32, ComboBox, CornerRadius, Frame, Label, Layout, ProgressBar, RichText,
     Stroke,
 };
-
-use buildcast_core::disks::{self, DiskInfo, human_size};
-use buildcast_core::stream;
-use buildcast_core::worker::{self, JobOpts, Notify, Progress, Stage};
 
 const MAX_DISK_BYTES: u64 = 256 * 1024 * 1024 * 1024;
 const BUF_MIB: [usize; 10] = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
 
 fn accent(dark: bool) -> Color32 {
     if dark {
-        Color32::from_rgb(0x5b, 0x93, 0xff)
+        Color32::from_rgb(0x5B, 0x93, 0xFF)
     } else {
-        Color32::from_rgb(0x2f, 0x6f, 0xed)
+        Color32::from_rgb(0x2F, 0x6F, 0xED)
     }
 }
 fn danger(dark: bool) -> Color32 {
     if dark {
-        Color32::from_rgb(0xef, 0x5a, 0x52)
+        Color32::from_rgb(0xEF, 0x5A, 0x52)
     } else {
-        Color32::from_rgb(0xc6, 0x28, 0x28)
+        Color32::from_rgb(0xC6, 0x28, 0x28)
     }
 }
 fn success(dark: bool) -> Color32 {
     if dark {
-        Color32::from_rgb(0x6f, 0xc5, 0x74)
+        Color32::from_rgb(0x6F, 0xC5, 0x74)
     } else {
-        Color32::from_rgb(0x2e, 0x7d, 0x32)
+        Color32::from_rgb(0x2E, 0x7D, 0x32)
     }
 }
 
@@ -93,7 +92,8 @@ impl App {
                 ] {
                     w.corner_radius = CornerRadius::same(8);
                 }
-                // checkbox ticks, combo highlights and focus rings follow the accent
+                // checkbox ticks, combo highlights and focus rings follow the
+                // accent
                 s.visuals.selection.bg_fill =
                     accent(dark).gamma_multiply(if dark { 0.5 } else { 0.35 });
                 s.visuals.selection.stroke = Stroke::new(1.0_f32, accent(dark));
@@ -183,7 +183,8 @@ impl App {
                                 {
                                     self.update_dismissed = true;
                                 }
-                                // installing exits the app; never allow it mid-job
+                                // installing exits the app; never allow it
+                                // mid-job
                                 #[cfg(windows)]
                                 if info.installer_url.is_some()
                                     && ui
@@ -716,7 +717,10 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui
                             .add(Button::new(RichText::new("🔄").size(16.0)))
-                            .on_hover_text("Refresh device list (also refreshes when the window regains focus)")
+                            .on_hover_text(
+                                "Refresh device list (also refreshes when the window regains \
+                                 focus)",
+                            )
                             .clicked()
                         {
                             self.refresh_disks();
@@ -744,8 +748,8 @@ impl App {
                     ),
                 )
                 .on_hover_text(
-                    "Also list internal and large disks. Writing to the wrong one \
-                     destroys its data; be careful.",
+                    "Also list internal and large disks. Writing to the wrong one destroys its \
+                     data; be careful.",
                 )
                 .changed();
             if changed {
@@ -767,9 +771,8 @@ impl App {
                 ui.checkbox(&mut self.verify, "Verify after write");
                 ui.checkbox(&mut self.compress, "Compress backup");
                 ui.checkbox(&mut self.force, "Force write").on_hover_text(
-                    "Write every block without comparing first. Faster on a \
-                         blank or fully different drive; slower when reflashing a \
-                         mostly identical image.",
+                    "Write every block without comparing first. Faster on a blank or fully \
+                     different drive; slower when reflashing a mostly identical image.",
                 );
                 ui.checkbox(&mut self.eject, "Eject when done")
                     .on_hover_text("Eject the media after a successful write or backup");
@@ -1061,7 +1064,8 @@ impl eframe::App for App {
                     self.options_row(ui, busy);
                     ui.add_space(4.0);
 
-                    // an update download ends in process::exit; don't start jobs under it
+                    // an update download ends in process::exit; don't start
+                    // jobs under it
                     let updating = matches!(
                         &*self.update.lock().unwrap(),
                         update::UpdateState::Downloading
@@ -1107,8 +1111,9 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use buildcast_core::worker::{Progress, Stage};
+
+    use super::*;
 
     #[test]
     fn eta_formats() {

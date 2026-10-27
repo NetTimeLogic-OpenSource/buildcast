@@ -1,4 +1,3 @@
-use super::{Device, DiskInfo};
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -20,6 +19,8 @@ use windows_sys::Win32::System::Ioctl::{
     PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
     StorageDeviceProperty,
 };
+
+use super::{Device, DiskInfo};
 
 const BUS_TYPE_USB: i32 = 7;
 // CTL_CODE(IOCTL_VOLUME_BASE 'V', 0, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -75,7 +76,8 @@ fn sector_size(f: &File) -> u32 {
 }
 
 fn device_number(f: &File) -> io::Result<u32> {
-    // STORAGE_DEVICE_NUMBER: DeviceType u32, DeviceNumber u32, PartitionNumber u32
+    // STORAGE_DEVICE_NUMBER: DeviceType u32, DeviceNumber u32, PartitionNumber
+    // u32
     let mut out = [0u8; 12];
     ioctl(f, IOCTL_STORAGE_GET_DEVICE_NUMBER, None, &mut out)?;
     Ok(u32::from_le_bytes(out[4..8].try_into().unwrap()))
@@ -225,7 +227,8 @@ fn lock_volumes(disk: u32) -> io::Result<Vec<File>> {
             .open(&vol)
         {
             // VOLUME_DISK_EXTENTS: NumberOfDiskExtents u32, pad, then
-            // DISK_EXTENT { DiskNumber u32, pad, StartingOffset i64, ExtentLength i64 } x N
+            // DISK_EXTENT { DiskNumber u32, pad, StartingOffset i64,
+            // ExtentLength i64 } x N
             let mut out = [0u8; 4096];
             if ioctl(&v, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, None, &mut out).is_ok() {
                 let count = u32::from_le_bytes(out[0..4].try_into().unwrap()) as usize;
