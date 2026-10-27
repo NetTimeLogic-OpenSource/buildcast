@@ -6,47 +6,39 @@ description = "Write compressed disk images to USB drives and create backups."
 license.workspace = true
 rust-version.workspace = true
 
-# bin embeds requireAdministrator manifest; its test harness can't run unelevated
-[[bin]]
-name = "buildcast"
-path = "src/main.rs"
-test = false
-
 [lib]
 name = "buildcast_gui"
 path = "src/app.rs"
 
 [dependencies]
-buildcast-core = { path = "../core" }
-raw-window-handle = "0.6.2"
-# default renderer is wgpu since 0.35 (~8 MB heavier); glow is plenty here
-eframe = { version = "0.35.0", default-features = false, features = [
-    "accesskit",
-    "default_fonts",
-    "glow",
-    "wayland",
-    "x11",
-] }
-egui = "0.35.0"
-rfd = "0.17.2"
-dirs = "6.0.0"
-chrono = "0.4.45"
-ureq = "3.3.0"
-serde_json = "1.0.151"
+buildcast-core = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+dirs = { workspace = true }
+egui = { workspace = true }
+raw-window-handle = { workspace = true }
+rfd = { workspace = true, features = ["wayland", "xdg-portal"] }
+serde_json = { workspace = true, features = ["std"] }
+ureq = { workspace = true, features = ["gzip", "rustls"] }
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = [
+# glow instead of the default wgpu renderer saves about 8 MB
+[dependencies.eframe]
+workspace = true
+features = ["accesskit", "default_fonts", "glow", "wayland", "x11"]
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+workspace = true
+features = [
     "Win32_Foundation",
     "Win32_System_Ole",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
-] }
+]
 
 [build-dependencies]
-embed-manifest = "1.5.0"
-winresource = "0.1.31"
+embed-manifest = { workspace = true }
+winresource = { workspace = true, features = ["toml"] }
 
 [package.metadata.deb]
 name = "buildcast"
